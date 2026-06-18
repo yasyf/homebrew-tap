@@ -1,0 +1,55 @@
+name: Publish to tap
+description: >-
+  Merge rendered Homebrew formula/cask files into yasyf/homebrew-tap and push.
+  The single source of the cross-repo git mechanics — a calling repo only renders
+  its own .rb files (formula/cask content is repo-specific) and hands them here.
+  Repos that release plain binaries should use goreleaser's built-in cask
+  publishing instead; this action is for formula repos that goreleaser can't serve
+  (a `service` block, a native-Linux build, etc.).
+
+inputs:
+  token:
+    description: A PAT (or fine-grained token) with contents:write on yasyf/homebrew-tap.
+    required: true
+  dir:
+    description: >-
+      A local directory whose contents are merged into the tap root, e.g. a
+      staging dir containing Formula/<name>.rb and/or Casks/<name>.rb.
+    required: true
+  message:
+    description: Commit message for the tap.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check out the tap
+      uses: actions/checkout@v6
+      with:
+        repository: yasyf/homebrew-tap
+        token: ${{ inputs.token }}
+        path: .tap-publish
+
+    - name: Merge, commit, and push
+      shell: bash
+      env:
+        PUBLISH_DIR: ${{ inputs.dir }}
+        PUBLISH_MSG: ${{ inputs.message }}
+      run: |
+        set -euo pipefail
+        [ -d "$PUBLISH_DIR" ] || { echo "::error::publish dir '$PUBLISH_DIR' does not exist"; exit 1; }
+        # Merge the staged Formula//Casks/ files into the tap working tree.
+        cp -R "$PUBLISH_DIR"/. .tap-publish/
+        cd .tap-publish
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        # `git add -A` then check the STAGED diff so brand-new (untracked) files
+        # count as a change — the one place this logic lives, so it can't drift
+        # or regress per repo.
+        git add -A
+        if git diff --cached --quiet; then
+          echo "tap already up to date; nothing to push"
+          exit 0
+        fi
+        git commit -m "$PUBLISH_MSG"
+        git push
