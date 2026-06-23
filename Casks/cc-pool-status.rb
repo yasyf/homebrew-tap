@@ -9,8 +9,8 @@
 # pushed here on every tagged release — do not hand-edit; change the
 # template in cc-pool's .github/workflows/release.yml instead.
 cask "cc-pool-status" do
-  version "0.33.0"
-  sha256 "6a444c02e2cc7f78e0003f8e080fb68e2ac7847f6355c709774fb3f32c4b74a3" # app
+  version "0.33.1"
+  sha256 "de06104a2c28d8f786384769f36969968c6444d5c7f578aaa2650c94c50c4546" # app
 
   url "https://github.com/yasyf/cc-pool/releases/download/v#{version}/cc-pool-status-v#{version}-darwin.zip"
   name "cc-pool Status"
