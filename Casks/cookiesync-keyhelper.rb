@@ -24,5 +24,5 @@ cask "cookiesync-keyhelper" do
 
   depends_on macos: :ventura # parsed with a ">=" comparator: ventura or newer
 
-  app "cookiesync-keyhelper.app"
+  stage_only true
 end
