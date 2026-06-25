@@ -57,6 +57,12 @@ runs:
       run: |
         set -euo pipefail
 
+        # Always make the canonical codesign script available + exported, so a goreleaser
+        # post-hook templated as {{ .Env.MACOS_CODESIGN_SCRIPT }} resolves even on an
+        # unsigned build (the script itself no-ops without MACOS_SIGN_IDENTITY).
+        install -m 0755 "$ACTION_PATH/macos-codesign.sh" "$RUNNER_TEMP/macos-codesign.sh"
+        echo "MACOS_CODESIGN_SCRIPT=$RUNNER_TEMP/macos-codesign.sh" >> "$GITHUB_ENV"
+
         if [ -z "${MACOS_SIGN_P12}" ]; then
           echo "import-developer-id: p12 empty — leaving the build unsigned."
           echo "signed=false" >> "$GITHUB_OUTPUT"
@@ -110,11 +116,6 @@ runs:
         else
           echo "import-developer-id: no notary key — binaries will be signed but not notarized."
         fi
-
-        # Drop the canonical codesign script and export its path so a goreleaser build
-        # post-hook can call it: bash "$MACOS_CODESIGN_SCRIPT" "{{ .Path }}" "{{ .Target }}"
-        install -m 0755 "$ACTION_PATH/macos-codesign.sh" "$RUNNER_TEMP/macos-codesign.sh"
-        echo "MACOS_CODESIGN_SCRIPT=$RUNNER_TEMP/macos-codesign.sh" >> "$GITHUB_ENV"
 
         echo "signed=true" >> "$GITHUB_OUTPUT"
         echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"

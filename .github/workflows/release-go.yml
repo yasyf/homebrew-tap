@@ -1,74 +1,151 @@
-# Reusable release workflow for the COMMON pure-Go path: one ubuntu runner where
-# goreleaser builds, (quill-)signs, and publishes to yasyf/homebrew-tap natively —
-# a `homebrew_casks:` block for a cask, or a `brews:` block for a formula (the
-# in-repo .goreleaser.yaml decides which). Repos that need a macOS runner (cgo with
-# native clang, a `lipo` universal binary, an Xcode `.app`) compose the homebrew-tap
-# composite actions in their own workflow instead of calling this.
+# The single reusable release workflow for every Go repo in the fleet. It owns the
+# whole job: verify-tag-on-main (or auto-tag), toolchain setup, Developer ID import,
+# `goreleaser release`, and — for the rich-formula repos goreleaser's brews block
+# can't express — render-formula + publish. Each repo's release.yml collapses to a
+# `uses:` + a few `with:` inputs; all the logic lives here, pinned `@v1`.
 #
-# The entire caller release.yml is then:
+# How a repo ships is decided by its in-repo .goreleaser.yaml plus these inputs:
+#   • cask (default): .goreleaser.yaml has a `homebrew_casks:` block; goreleaser
+#     publishes it. (cc-merge, reposync, cc-review, cc-orchestrate, slop-cop)
+#   • formula: set render-formula:true + formula-template/formula-name; goreleaser
+#     builds with NO homebrew block, then render-formula + publish ship the .rb.
+#     (ccx, synckitd)
+#   • signing: signer:quill (default, ubuntu, full-chain p12) or signer:codesign
+#     (a macOS runner; the import-developer-id action wires native codesign via a
+#     goreleaser post-hook calling {{ .Env.MACOS_CODESIGN_SCRIPT }}).
 #
-#   name: Release
-#   on: { push: { tags: ["v*"] } }
-#   permissions: { contents: write }
-#   jobs:
-#     release:
-#       uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@v1
-#       secrets: inherit            # passes HOMEBREW_TAP_TOKEN + the five MACOS_* secrets
-#       with:
-#         setup-bun: true           # only if a go:embed prebuild hook needs it
-#
-# Secrets (set once per repo via repo-bootstrap set-release-secrets.sh):
-#   HOMEBREW_TAP_TOKEN  — PAT with contents:write on yasyf/homebrew-tap
-#   MACOS_SIGN_P12 / MACOS_SIGN_PASSWORD / MACOS_NOTARY_ISSUER_ID / MACOS_NOTARY_KEY_ID /
-#   MACOS_NOTARY_KEY — optional; quill signs+notarizes the darwin binaries when set
-#   (the .goreleaser.yaml notarize block gates on MACOS_SIGN_P12 being non-empty).
-#   A full-chain p12 (leaf + Developer ID intermediate + Apple Root CA) is required for
-#   quill — without the root, quill emits a DR macOS SIGKILLs (see repo-bootstrap docs).
+# Callers MUST use `secrets: inherit` (forwards HOMEBREW_TAP_TOKEN + the five MACOS_*).
+# Minimal callers:
+#   jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@v1, secrets: inherit } }
+#   formula:  with: { render-formula: true, formula-template: .github/formula/x.rb.tmpl, formula-name: x }
+#   cgo cask: with: { runner: macos-latest, signer: codesign, setup-zig: "0.16.0" }
 
 name: release-go (reusable)
 
 on:
   workflow_call:
     inputs:
+      runner:
+        description: runner for the release job (ubuntu-latest for quill/pure-Go; a macos runner for codesign/cgo)
+        type: string
+        default: ubuntu-latest
       go-version-file:
         description: passed to actions/setup-go
         type: string
         default: go.mod
+      signer:
+        description: "quill (ubuntu, goreleaser notarize) or codesign (macOS, native codesign+notarytool)"
+        type: string
+        default: quill
       setup-bun:
         description: install bun before goreleaser (for a go:embed SPA prebuild hook)
         type: boolean
         default: false
+      setup-zig:
+        description: 'mlugg/setup-zig version to install (e.g. "0.16.0"); empty to skip'
+        type: string
+        default: ""
+      auto-tag:
+        description: 'release on push to main with a monotonic v0.1.<run_number> tag (skips verify-tag-on-main)'
+        type: boolean
+        default: false
+      pre-build:
+        description: 'repo-specific runner setup run before goreleaser (install toolchains, echo env to $GITHUB_ENV)'
+        type: string
+        default: ""
+      render-formula:
+        description: 'render a hand-maintained Formula/<name>.rb after goreleaser and publish it (for formulae goreleaser brews cannot express)'
+        type: boolean
+        default: false
+      formula-template:
+        description: path to the .rb template (required when render-formula is true)
+        type: string
+        default: ""
+      formula-name:
+        description: formula/archive base name (required when render-formula is true)
+        type: string
+        default: ""
 
 permissions:
   contents: write
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
       - name: Verify the tag is on main
+        if: ${{ !inputs.auto-tag }}
         uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@v1
+
+      - name: Auto-tag (push-to-main release)
+        if: ${{ inputs.auto-tag }}
+        run: |
+          set -euo pipefail
+          TAG="v0.1.${{ github.run_number }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "GORELEASER_CURRENT_TAG=$TAG" >> "$GITHUB_ENV"
+
       - if: ${{ inputs.setup-bun }}
         uses: oven-sh/setup-bun@v2
+
+      - if: ${{ inputs.setup-zig != '' }}
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ inputs.setup-zig }}
+
       - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ inputs.go-version-file }}
           cache: true
+
+      - name: Repo-specific pre-build setup
+        if: ${{ inputs.pre-build != '' }}
+        run: ${{ inputs.pre-build }}
+
+      - name: Import Developer ID certificate
+        if: ${{ inputs.signer == 'codesign' }}
+        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@v1
+        with:
+          p12: ${{ secrets.MACOS_SIGN_P12 }}
+          p12-password: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          notary-key: ${{ secrets.MACOS_NOTARY_KEY }}
+          notary-key-id: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          notary-issuer-id: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PAT with contents:write on yasyf/homebrew-tap — the default GITHUB_TOKEN
-          # cannot push cross-repo. goreleaser's homebrew_casks/brews block reads it.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          # Apple Developer signing + notarization via quill (no-op when unset).
+          # quill path (ubuntu) reads these; the .goreleaser.yaml notarize block gates on
+          # MACOS_SIGN_P12 being non-empty. The codesign path instead reads
+          # MACOS_SIGN_IDENTITY / MACOS_NOTARY_* / MACOS_CODESIGN_SCRIPT from $GITHUB_ENV
+          # (set by the import-developer-id step above), so it ignores these.
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
           MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+
+      - name: Render the formula
+        if: ${{ inputs.render-formula }}
+        uses: yasyf/homebrew-tap/.github/actions/render-formula@v1
+        with:
+          template: ${{ inputs.formula-template }}
+          name: ${{ inputs.formula-name }}
+          output: Formula/${{ inputs.formula-name }}.rb
+
+      - name: Publish the formula to the tap
+        if: ${{ inputs.render-formula }}
+        uses: yasyf/homebrew-tap/.github/actions/publish@v1
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          dir: tap-staging
+          message: "${{ inputs.formula-name }} ${{ github.ref_name }}"
