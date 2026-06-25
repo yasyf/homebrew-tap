@@ -1,0 +1,21 @@
+name: Verify tag on main
+description: >-
+  Fail unless the tagged commit (github.sha) is reachable from origin/main.
+  Versioned releases must come from main, so a tag cut off a side branch (or one
+  that lost a push race) is refused before any build runs. Requires a prior
+  actions/checkout with fetch-depth: 0 so merge-base can reach the common ancestor.
+
+runs:
+  using: composite
+  steps:
+    - name: Require the tagged commit to be on main
+      shell: bash
+      run: |
+        set -euo pipefail
+        git fetch --no-tags --quiet origin main
+        if git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+          echo "✓ ${GITHUB_REF_NAME} (${GITHUB_SHA}) is on main."
+        else
+          echo "::error title=Tag not on main::${GITHUB_REF_NAME} points at ${GITHUB_SHA}, which is not on main. Only commits on main can be released — tag a commit that has landed on main (e.g. git tag vX.Y.Z origin/main), then push the tag."
+          exit 1
+        fi

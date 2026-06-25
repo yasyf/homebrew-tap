@@ -1,0 +1,122 @@
+name: Import Developer ID certificate
+description: >-
+  Import the Apple Developer ID Application certificate into a throwaway keychain
+  on a macOS runner, resolve the signing identity + Team ID, decode the App Store
+  Connect notary key, and export standardized signing env for codesign/notarytool.
+  Also drops the canonical macos-codesign.sh on the runner and exports
+  $MACOS_CODESIGN_SCRIPT so a goreleaser build post-hook (or a hand build) can sign
+  each darwin binary with one shared script. No-op when the p12 input is empty, so
+  a repo without Apple credentials still builds (unsigned). macOS runners only.
+  This is the single home of the keychain dance — never copy it into a repo again.
+
+inputs:
+  p12:
+    description: base64-encoded full-chain Developer ID Application .p12 (leaf + Developer ID intermediate + Apple Root CA)
+    required: false
+    default: ""
+  p12-password:
+    description: password for the .p12
+    required: false
+    default: ""
+  notary-key:
+    description: base64-encoded App Store Connect API .p8 (enables notarization)
+    required: false
+    default: ""
+  notary-key-id:
+    description: App Store Connect API key id
+    required: false
+    default: ""
+  notary-issuer-id:
+    description: App Store Connect issuer id (exported as MACOS_NOTARY_ISSUER for notarytool)
+    required: false
+    default: ""
+
+outputs:
+  signed:
+    description: "'true' when the signing identity was imported and the env was set up, else 'false'"
+    value: ${{ steps.import.outputs.signed }}
+  identity:
+    description: 'the resolved "Developer ID Application: NAME (TEAMID)" identity (empty when unsigned)'
+    value: ${{ steps.import.outputs.identity }}
+  team-id:
+    description: the Apple Team ID derived from the identity (empty when unsigned)
+    value: ${{ steps.import.outputs.team-id }}
+
+runs:
+  using: composite
+  steps:
+    - id: import
+      shell: bash
+      env:
+        MACOS_SIGN_P12: ${{ inputs.p12 }}
+        MACOS_SIGN_PASSWORD: ${{ inputs.p12-password }}
+        MACOS_NOTARY_KEY: ${{ inputs.notary-key }}
+        MACOS_NOTARY_KEY_ID: ${{ inputs.notary-key-id }}
+        MACOS_NOTARY_ISSUER_ID: ${{ inputs.notary-issuer-id }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${MACOS_SIGN_P12}" ]; then
+          echo "import-developer-id: p12 empty — leaving the build unsigned."
+          echo "signed=false" >> "$GITHUB_OUTPUT"
+          echo "identity=" >> "$GITHUB_OUTPUT"
+          echo "team-id=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [ "${RUNNER_OS}" != "macOS" ]; then
+          echo "::error title=Wrong runner::import-developer-id needs a macOS runner (codesign/notarytool are macOS-only). Use the quill signing path on ubuntu instead, or set runs-on: macos-*."
+          exit 1
+        fi
+
+        # Import into a throwaway keychain (NEVER do this on a dev Mac — it locks the
+        # login keychain). The keychain is added to the user search list so codesign
+        # finds the identity.
+        KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+        KP="$(openssl rand -base64 24)"
+        security create-keychain -p "$KP" "$KEYCHAIN"
+        security set-keychain-settings -lut 21600 "$KEYCHAIN"
+        security unlock-keychain -p "$KP" "$KEYCHAIN"
+        echo -n "$MACOS_SIGN_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+        security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_SIGN_PASSWORD" -T /usr/bin/codesign
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KP" "$KEYCHAIN" >/dev/null
+        # shellcheck disable=SC2046  # intentional: re-add the existing keychains as separate args
+        security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/[\" ]//g')
+        rm -f "$RUNNER_TEMP/cert.p12"
+
+        # Derive the signing identity AND Team ID from the cert — never hardcode, so a
+        # cert/team rotation can't silently drift. The Team ID is the parenthesized
+        # suffix of "Developer ID Application: … (TEAMID)".
+        IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+        test -n "$IDENTITY" || { echo "::error::no Developer ID Application identity in the imported keychain"; exit 1; }
+        TEAM_ID="$(printf '%s' "$IDENTITY" | sed -n 's/.*(\([A-Z0-9]*\))$/\1/p')"
+        test -n "$TEAM_ID" || { echo "::error::could not derive Team ID from identity '$IDENTITY'"; exit 1; }
+
+        {
+          echo "MACOS_SIGN_IDENTITY=$IDENTITY"
+          echo "TEAM_ID=$TEAM_ID"
+        } >> "$GITHUB_ENV"
+
+        # Notary key is optional: signing without it produces a signed-but-not-notarized
+        # binary. When present, expose the .p8 + ids under the standardized names the
+        # shared macos-codesign.sh (and notarytool) read.
+        if [ -n "${MACOS_NOTARY_KEY}" ]; then
+          echo -n "$MACOS_NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          {
+            echo "MACOS_NOTARY_KEY_FILE=$RUNNER_TEMP/notary.p8"
+            echo "MACOS_NOTARY_KEY_ID=$MACOS_NOTARY_KEY_ID"
+            echo "MACOS_NOTARY_ISSUER=$MACOS_NOTARY_ISSUER_ID"
+          } >> "$GITHUB_ENV"
+        else
+          echo "import-developer-id: no notary key — binaries will be signed but not notarized."
+        fi
+
+        # Drop the canonical codesign script and export its path so a goreleaser build
+        # post-hook can call it: bash "$MACOS_CODESIGN_SCRIPT" "{{ .Path }}" "{{ .Target }}"
+        install -m 0755 "$ACTION_PATH/macos-codesign.sh" "$RUNNER_TEMP/macos-codesign.sh"
+        echo "MACOS_CODESIGN_SCRIPT=$RUNNER_TEMP/macos-codesign.sh" >> "$GITHUB_ENV"
+
+        echo "signed=true" >> "$GITHUB_OUTPUT"
+        echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
+        echo "team-id=$TEAM_ID" >> "$GITHUB_OUTPUT"
+        echo "import-developer-id: '$IDENTITY' (team $TEAM_ID) ready; macos-codesign.sh at $RUNNER_TEMP/macos-codesign.sh"

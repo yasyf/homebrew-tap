@@ -1,0 +1,74 @@
+# Reusable release workflow for the COMMON pure-Go path: one ubuntu runner where
+# goreleaser builds, (quill-)signs, and publishes to yasyf/homebrew-tap natively —
+# a `homebrew_casks:` block for a cask, or a `brews:` block for a formula (the
+# in-repo .goreleaser.yaml decides which). Repos that need a macOS runner (cgo with
+# native clang, a `lipo` universal binary, an Xcode `.app`) compose the homebrew-tap
+# composite actions in their own workflow instead of calling this.
+#
+# The entire caller release.yml is then:
+#
+#   name: Release
+#   on: { push: { tags: ["v*"] } }
+#   permissions: { contents: write }
+#   jobs:
+#     release:
+#       uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@v1
+#       secrets: inherit            # passes HOMEBREW_TAP_TOKEN + the five MACOS_* secrets
+#       with:
+#         setup-bun: true           # only if a go:embed prebuild hook needs it
+#
+# Secrets (set once per repo via repo-bootstrap set-release-secrets.sh):
+#   HOMEBREW_TAP_TOKEN  — PAT with contents:write on yasyf/homebrew-tap
+#   MACOS_SIGN_P12 / MACOS_SIGN_PASSWORD / MACOS_NOTARY_ISSUER_ID / MACOS_NOTARY_KEY_ID /
+#   MACOS_NOTARY_KEY — optional; quill signs+notarizes the darwin binaries when set
+#   (the .goreleaser.yaml notarize block gates on MACOS_SIGN_P12 being non-empty).
+#   A full-chain p12 (leaf + Developer ID intermediate + Apple Root CA) is required for
+#   quill — without the root, quill emits a DR macOS SIGKILLs (see repo-bootstrap docs).
+
+name: release-go (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      go-version-file:
+        description: passed to actions/setup-go
+        type: string
+        default: go.mod
+      setup-bun:
+        description: install bun before goreleaser (for a go:embed SPA prebuild hook)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Verify the tag is on main
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@v1
+      - if: ${{ inputs.setup-bun }}
+        uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          cache: true
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with contents:write on yasyf/homebrew-tap — the default GITHUB_TOKEN
+          # cannot push cross-repo. goreleaser's homebrew_casks/brews block reads it.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Apple Developer signing + notarization via quill (no-op when unset).
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}

@@ -1,0 +1,102 @@
+name: Render Homebrew formula/cask
+description: >-
+  Fill a repo's hand-maintained .rb template into a staging dir, then hand the dir
+  to the publish action. For the irreducible formulae goreleaser's brews block can't
+  express (conditional install logic, a runtime File.exist? autodetect, a second
+  resource). Fills __VERSION__ and — when `name`+`checksums` are given — the four
+  standard __SHA_<OS>_<ARCH>__ tokens from a goreleaser checksums.txt; any extra
+  tokens come from `substitutions`. The publish action ships the result idempotently.
+
+inputs:
+  template:
+    description: path to the .rb template (with __VERSION__ / __SHA_*__ / custom tokens)
+    required: true
+  output:
+    description: output path within the staging dir, e.g. Formula/cc-notes.rb or Casks/foo.rb
+    required: true
+  staging-dir:
+    description: staging dir whose contents the publish action merges into the tap root
+    required: false
+    default: tap-staging
+  version:
+    description: version to fill __VERSION__ with; defaults to GITHUB_REF_NAME minus a leading v
+    required: false
+    default: ""
+  name:
+    description: archive base name for the standard 4-arch sha lookup (omit to skip auto sha)
+    required: false
+    default: ""
+  checksums:
+    description: goreleaser checksums.txt used for the standard 4-arch sha lookup
+    required: false
+    default: dist/checksums.txt
+  substitutions:
+    description: >-
+      newline-separated TOKEN=VALUE pairs sed-substituted into the template (values
+      must not contain a '|'). Use for non-standard archives (universal/fuse/app shas).
+    required: false
+    default: ""
+
+outputs:
+  file:
+    description: path to the rendered file
+    value: ${{ steps.render.outputs.file }}
+
+runs:
+  using: composite
+  steps:
+    - id: render
+      shell: bash
+      env:
+        TEMPLATE: ${{ inputs.template }}
+        OUTPUT: ${{ inputs.output }}
+        STAGING: ${{ inputs.staging-dir }}
+        VERSION_IN: ${{ inputs.version }}
+        NAME: ${{ inputs.name }}
+        CHECKSUMS: ${{ inputs.checksums }}
+        SUBSTITUTIONS: ${{ inputs.substitutions }}
+      run: |
+        set -euo pipefail
+        test -f "$TEMPLATE" || { echo "::error::template '$TEMPLATE' not found"; exit 1; }
+        version="${VERSION_IN:-${GITHUB_REF_NAME#v}}"
+        test -n "$version" || { echo "::error::could not resolve a version"; exit 1; }
+
+        out="$STAGING/$OUTPUT"
+        mkdir -p "$(dirname "$out")"
+        cp "$TEMPLATE" "$out.tmp"
+
+        sed_inplace() { sed -e "s|$1|$2|g" "$out.tmp" > "$out.tmp.next" && mv "$out.tmp.next" "$out.tmp"; }
+
+        sed_inplace "__VERSION__" "$version"
+
+        if [ -n "$NAME" ]; then
+          test -f "$CHECKSUMS" || { echo "::error::checksums '$CHECKSUMS' not found (needed for name=$NAME)"; exit 1; }
+          sha() {
+            local f
+            f="$(grep -E "  ${NAME}_${version}_$1\.tar\.gz\$" "$CHECKSUMS" | head -1 | cut -d' ' -f1)"
+            test -n "$f" || { echo "::error::no checksum for ${NAME}_${version}_$1.tar.gz in $CHECKSUMS"; exit 1; }
+            printf '%s' "$f"
+          }
+          sed_inplace "__SHA_DARWIN_ARM64__" "$(sha darwin_arm64)"
+          sed_inplace "__SHA_DARWIN_AMD64__" "$(sha darwin_amd64)"
+          sed_inplace "__SHA_LINUX_ARM64__"  "$(sha linux_arm64)"
+          sed_inplace "__SHA_LINUX_AMD64__"  "$(sha linux_amd64)"
+        fi
+
+        if [ -n "$SUBSTITUTIONS" ]; then
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            token="${line%%=*}"
+            value="${line#*=}"
+            sed_inplace "$token" "$value"
+          done <<< "$SUBSTITUTIONS"
+        fi
+
+        if grep -nE '__[A-Z0-9_]+__' "$out.tmp"; then
+          echo "::error::unfilled __TOKEN__ remains in the rendered $OUTPUT (see above)"; exit 1
+        fi
+
+        mv "$out.tmp" "$out"
+        echo "----- rendered $out -----"
+        cat "$out"
+        echo "file=$out" >> "$GITHUB_OUTPUT"
