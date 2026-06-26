@@ -1,0 +1,116 @@
+name: Sign, notarize, staple a macOS .app
+description: >-
+  The shared tail for shipping a macOS .app as a Homebrew cask: (optionally)
+  Developer ID codesign the bundle inside-out, notarize it (fail-loud on any
+  non-Accepted status), staple the ticket, and ditto-zip the stapled bundle into
+  dist/<name>-<ref>-darwin.zip. Outputs the zip's sha256 for the cask render, and
+  (by default) attaches the zip to the release. The .app BUILD stays per-repo (Go
+  lipo bundle, xcodebuild, Secure-Enclave helper); everything after is this action.
+  Requires the import-developer-id action to have run first (reads MACOS_SIGN_IDENTITY
+  + MACOS_NOTARY_* from the env). Pair with render-formula (Casks/<name>.rb, filling
+  __SHA_APP__) + publish.
+
+inputs:
+  app:
+    description: path to the built .app bundle
+    required: true
+  name:
+    description: cask/asset base name (the zip is dist/<name>-<github.ref_name>-darwin.zip)
+    required: true
+  sign:
+    description: "codesign the bundle inside-out before notarizing (set false when xcodebuild already signed it, e.g. an app with a nested appex)"
+    required: false
+    default: "true"
+  entitlements:
+    description: optional entitlements plist for codesign (e.g. com.apple.security.cs.disable-library-validation for a dylib-dlopen'ing binary)
+    required: false
+    default: ""
+  bundle-id:
+    description: bundle identifier (informational/logging)
+    required: false
+    default: ""
+  attach-to-release:
+    description: attach the zip + its .sha256 to the github.ref_name release
+    required: false
+    default: "true"
+
+outputs:
+  sha256:
+    description: sha256 of the stapled .app zip (feed to render-formula as __SHA_APP__)
+    value: ${{ steps.pkg.outputs.sha256 }}
+  zip:
+    description: path to the stapled .app zip asset
+    value: ${{ steps.pkg.outputs.zip }}
+
+runs:
+  using: composite
+  steps:
+    - id: pkg
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        NAME: ${{ inputs.name }}
+        SIGN: ${{ inputs.sign }}
+        ENTITLEMENTS: ${{ inputs.entitlements }}
+      run: |
+        set -euo pipefail
+        test -d "$APP" || { echo "::error::app bundle '$APP' not found"; exit 1; }
+        test -n "${MACOS_SIGN_IDENTITY:-}" || { echo "::error::MACOS_SIGN_IDENTITY unset — an .app cask must be signed (run import-developer-id first)"; exit 1; }
+
+        ents=()
+        if [ -n "${ENTITLEMENTS}" ]; then
+          test -f "$ENTITLEMENTS" || { echo "::error::entitlements '$ENTITLEMENTS' not found"; exit 1; }
+          ents=(--entitlements "$ENTITLEMENTS")
+        fi
+
+        if [ "$SIGN" = "true" ]; then
+          # Inside-out: every Mach-O in Contents/MacOS first, then the bundle. Hardened
+          # runtime + secure timestamp. (Apps with a nested appex are pre-signed by
+          # xcodebuild — pass sign:false for those.)
+          for f in "$APP"/Contents/MacOS/*; do
+            [ -f "$f" ] || continue
+            codesign --force --options runtime --timestamp ${ents[@]+"${ents[@]}"} -s "$MACOS_SIGN_IDENTITY" "$f"
+          done
+          codesign --force --options runtime --timestamp ${ents[@]+"${ents[@]}"} -s "$MACOS_SIGN_IDENTITY" "$APP"
+        fi
+        codesign --verify --deep --strict --verbose=2 "$APP"
+
+        # Notarize the bundle. notarytool submit --wait exits 0 even on an Invalid result,
+        # so capture the JSON and FAIL LOUD unless Accepted, dumping the per-issue log.
+        notarize=1
+        test -n "${MACOS_NOTARY_KEY_FILE:-}" || { echo "::warning::no notary key — shipping signed-but-not-notarized"; notarize=0; }
+        if [ "$notarize" = "1" ]; then
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$MACOS_NOTARY_KEY_FILE" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER" \
+            --wait --timeout 20m --output-format json > "$RUNNER_TEMP/notary.json"
+          cat "$RUNNER_TEMP/notary.json"
+          sid="$(plutil -extract id raw -o - "$RUNNER_TEMP/notary.json")"
+          if [ "$(plutil -extract status raw -o - "$RUNNER_TEMP/notary.json")" != "Accepted" ]; then
+            xcrun notarytool log "$sid" --key "$MACOS_NOTARY_KEY_FILE" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER" || true
+            echo "::error::notarization not Accepted for $APP (submission $sid)"; exit 1
+          fi
+          # Staple so a quarantined install validates offline (an .app can be stapled).
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+        fi
+
+        # ditto -c -k preserves bundle metadata a plain zip drops; zip the STAPLED bundle.
+        mkdir -p dist
+        zip="dist/${NAME}-${GITHUB_REF_NAME}-darwin.zip"
+        ditto -c -k --keepParent "$APP" "$zip"
+        sha="$(shasum -a 256 "$zip" | awk '{print $1}')"
+        shasum -a 256 "$zip" > "$zip.sha256"
+        echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+        echo "zip=$zip" >> "$GITHUB_OUTPUT"
+        echo "sign-notarize-app: $zip ($sha)"
+
+    - name: Attach the .app zip to the release
+      if: ${{ inputs.attach-to-release == 'true' }}
+      uses: softprops/action-gh-release@v3
+      with:
+        files: |
+          ${{ steps.pkg.outputs.zip }}
+          ${{ steps.pkg.outputs.zip }}.sha256
+        generate_release_notes: false
+        prerelease: ${{ contains(github.ref_name, '-') }}
