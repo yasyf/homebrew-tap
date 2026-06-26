@@ -46,7 +46,9 @@ if [ -n "${MACOS_CODESIGN_ENTITLEMENTS:-}" ]; then
 fi
 
 echo "macos-codesign: signing $bin ($target)"
-codesign --force --options runtime --timestamp "${ents_args[@]}" -s "$MACOS_SIGN_IDENTITY" "$bin"
+# ${arr[@]+"${arr[@]}"} expands to nothing when the array is empty — safe under `set -u`
+# on the macOS runner's bash 3.2, where a bare "${arr[@]}" on an empty array aborts.
+codesign --force --options runtime --timestamp ${ents_args[@]+"${ents_args[@]}"} -s "$MACOS_SIGN_IDENTITY" "$bin"
 codesign --verify --strict --verbose=2 "$bin"
 
 if [ -n "${MACOS_NOTARY_KEY_FILE:-}" ]; then
