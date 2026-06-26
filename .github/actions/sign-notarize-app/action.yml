@@ -33,6 +33,10 @@ inputs:
     description: attach the zip + its .sha256 to the github.ref_name release
     required: false
     default: "true"
+  release-notes:
+    description: "generate release notes when attaching (true when this job creates the release; false when goreleaser already created it)"
+    required: false
+    default: "false"
 
 outputs:
   sha256:
@@ -112,5 +116,5 @@ runs:
         files: |
           ${{ steps.pkg.outputs.zip }}
           ${{ steps.pkg.outputs.zip }}.sha256
-        generate_release_notes: false
+        generate_release_notes: ${{ inputs.release-notes == 'true' }}
         prerelease: ${{ contains(github.ref_name, '-') }}
