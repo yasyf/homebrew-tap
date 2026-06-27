@@ -1,30 +1,26 @@
-# The single reusable PyPI release workflow for every Python repo in the fleet — the
-# Python sibling of release-go.yml. It owns the whole job: verify-tag-on-main (gate),
-# build (pure uv_build OR a maturin native-wheel matrix), OIDC trusted-publish to PyPI,
-# and a GitHub release. Each repo's release-pypi.yml collapses to a `uses:` + a few
-# `with:` inputs; all the logic lives here, pinned `@pypi-v1`.
+# The shared BUILD half of the fleet's Python→PyPI release — the Python sibling of
+# release-go.yml. It owns the complex, duplicated part: verify-tag-on-main (gate),
+# version resolution, the >latest-on-PyPI guard, and the build (pure uv_build OR a
+# maturin native-wheel matrix). It uploads dist* artifacts and outputs the release tag.
 #
-# How a repo ships is decided by these inputs:
-#   • pure (default): flat uv_build package — `uv build` makes sdist+wheel.
-#     (cc-pushback, spawnllm, captain-hook, docker-dsl, dailies)
-#   • maturin: maturin:true builds native wheels across `maturin-matrix` + an sdist.
-#     (cc-transcript — PyO3; per-CPython wheels, NOT abi3). maturin requires version-strategy:tag,
-#     package-subdir:'.' (repo-root), and no pre-build — the build jobs fail fast otherwise.
-#   • continuous-deploy: version-strategy:auto-tag derives v<base>.<run_number> and
-#     skips the on-main gate; pair with package-subdir + a pre-build hook. (cc-sentiment)
+# It does NOT publish. PyPI Trusted Publishing authenticates via the OIDC job_workflow_ref
+# claim, which for a reusable workflow points at THIS repo (homebrew-tap), not the caller —
+# and reusable workflows are not supported by PyPI Trusted Publishing. So the caller runs
+# the OIDC `publish` job itself (job_workflow_ref = caller's release-pypi.yml → matches the
+# repo's existing trusted publisher, no pypi.org change) plus a `github-release` job that
+# uses this workflow's `tag` output. See the repo-bootstrap caller template.
 #
-# Auth is OIDC trusted publishing only — no API token anywhere. The PyPI publisher
-# config keys on the CALLER's workflow filename (release-pypi.yml) + environment `pypi`,
-# unchanged by this reusable-workflow conversion.
+# How a repo ships (inputs):
+#   • pure (default): flat uv_build — `uv build` makes sdist+wheel.
+#   • maturin: maturin:true builds native wheels across `maturin-matrix` + an sdist
+#     (cc-transcript — PyO3; per-CPython wheels, NOT abi3). Requires version-strategy:tag,
+#     package-subdir:'.', and no pre-build — the build jobs fail fast otherwise.
+#   • continuous-deploy: version-strategy:auto-tag derives v<base>.<run_number> and skips
+#     the on-main gate; pair with package-subdir + a pre-build hook. (cc-sentiment)
 #
 # Callers MUST use `secrets: inherit` (forwards GITHUB_TOKEN + any SENTRY_DSN a pre-build bakes).
-# Minimal callers:
-#   tag:      jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-pypi.yml@pypi-v1, secrets: inherit, with: { dist-name: capt-hook, python-version: "3.13" } } }
-#   maturin:  with: { maturin: true }
-#   auto-tag: on: { push: { branches: [main], paths: [client/**] } }
-#             with: { version-strategy: auto-tag, auto-tag-version-base: "0.2", package-subdir: client, pre-build: "..." }
 
-name: release-pypi (reusable)
+name: release-pypi-build (reusable)
 
 on:
   workflow_call:
@@ -81,6 +77,10 @@ on:
         description: run `uv run --extra dev pytest` before building (pure path)
         type: boolean
         default: false
+    outputs:
+      tag:
+        description: the resolved release tag (e.g. v1.2.3) for the caller's github-release job
+        value: ${{ jobs.build.outputs.tag || jobs.build_sdist.outputs.tag }}
 
 jobs:
   verify-tag-on-main:
@@ -103,6 +103,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
     steps:
       - uses: actions/checkout@v6
 
@@ -122,11 +124,13 @@ jobs:
           set -euo pipefail
           if [ "$VERSION_STRATEGY" = "auto-tag" ]; then
             VERSION="${VERSION_BASE}.${RUN_NUMBER}"
+            TAG="v$VERSION"
           else
             VERSION="${GITHUB_REF_NAME#v}"
+            TAG="$GITHUB_REF_NAME"
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Resolved version: $VERSION"
+          { echo "version=$VERSION"; echo "tag=$TAG"; } >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION (tag $TAG)"
 
       - name: Tag must exceed the latest published version
         if: ${{ inputs.check-version && inputs.version-strategy == 'tag' }}
@@ -225,13 +229,15 @@ jobs:
           if-no-files-found: error
 
   build_sdist:
-    # maturin sdist (one, on ubuntu).
+    # maturin sdist (one, on ubuntu). maturin is always tag mode, so the tag is github.ref_name.
     needs: [verify-tag-on-main]
     if: ${{ !cancelled() && !failure() && inputs.maturin }}
     name: Build sdist
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      tag: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v6
 
@@ -281,64 +287,3 @@ jobs:
           name: dist-sdist
           path: dist/*.tar.gz
           if-no-files-found: error
-
-  publish:
-    # OIDC trusted publishing — no token. Runs once the active build path (pure OR maturin)
-    # succeeded; the inactive path's jobs are skipped, which !failure() tolerates. It also
-    # needs the gate so a FAILED verify-tag-on-main (tag off main) blocks publish — without
-    # it, the build jobs skip (not fail) and !failure() would wrongly let publish proceed.
-    needs: [verify-tag-on-main, build, build_wheels, build_sdist]
-    if: ${{ !cancelled() && !failure() }}
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: dist*
-          path: dist
-          merge-multiple: true
-
-      - uses: pypa/gh-action-pypi-publish@release/v1
-
-  github-release:
-    needs: publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Resolve tag
-        id: ver
-        env:
-          VERSION_STRATEGY: ${{ inputs.version-strategy }}
-          VERSION_BASE: ${{ inputs.auto-tag-version-base }}
-          RUN_NUMBER: ${{ github.run_number }}
-        run: |
-          set -euo pipefail
-          if [ "$VERSION_STRATEGY" = "auto-tag" ]; then
-            echo "tag=v${VERSION_BASE}.${RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: dist*
-          path: dist
-          merge-multiple: true
-
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.ver.outputs.tag }}
-          VERSION_STRATEGY: ${{ inputs.version-strategy }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          args=(--title "$TAG" --generate-notes --latest --repo "$REPO")
-          if [ "$VERSION_STRATEGY" = "auto-tag" ]; then
-            args+=(--target "$SHA")
-          fi
-          gh release create "$TAG" "${args[@]}" dist/*
