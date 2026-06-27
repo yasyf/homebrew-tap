@@ -22,9 +22,13 @@ inputs:
     required: false
     default: "true"
   entitlements:
-    description: optional entitlements plist for codesign (e.g. com.apple.security.cs.disable-library-validation for a dylib-dlopen'ing binary)
+    description: optional entitlements plist for codesign
     required: false
     default: ""
+  disable-library-validation:
+    description: "sign with a built-in com.apple.security.cs.disable-library-validation entitlement (for a bundle that dlopens a third-party dylib, e.g. libfuse-t); ignored when entitlements is set"
+    required: false
+    default: "false"
   bundle-id:
     description: bundle identifier (informational/logging)
     required: false
@@ -56,6 +60,7 @@ runs:
         NAME: ${{ inputs.name }}
         SIGN: ${{ inputs.sign }}
         ENTITLEMENTS: ${{ inputs.entitlements }}
+        DISABLE_LIBRARY_VALIDATION: ${{ inputs.disable-library-validation }}
       run: |
         set -euo pipefail
         test -d "$APP" || { echo "::error::app bundle '$APP' not found"; exit 1; }
@@ -65,6 +70,10 @@ runs:
         if [ -n "${ENTITLEMENTS}" ]; then
           test -f "$ENTITLEMENTS" || { echo "::error::entitlements '$ENTITLEMENTS' not found"; exit 1; }
           ents=(--entitlements "$ENTITLEMENTS")
+        elif [ "$DISABLE_LIBRARY_VALIDATION" = "true" ]; then
+          ent="$RUNNER_TEMP/disable-library-validation.entitlements"
+          printf '%s' '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.cs.disable-library-validation</key><true/></dict></plist>' > "$ent"
+          ents=(--entitlements "$ent")
         fi
 
         if [ "$SIGN" = "true" ]; then

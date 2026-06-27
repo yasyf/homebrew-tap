@@ -21,9 +21,11 @@
 #   MACOS_NOTARY_KEY_FILE      — path to the App Store Connect API .p8 (enables notarization)
 #   MACOS_NOTARY_KEY_ID        — the key's Key ID
 #   MACOS_NOTARY_ISSUER        — the team's Issuer ID
-#   MACOS_CODESIGN_ENTITLEMENTS — optional path to an entitlements plist. Set this for a
-#       cgo binary that dlopens a third-party dylib (e.g. libfuse-t): the plist must carry
-#       com.apple.security.cs.disable-library-validation, or hardened runtime blocks the load.
+#   MACOS_CODESIGN_ENTITLEMENTS — optional path to an entitlements plist.
+#   MACOS_CODESIGN_DISABLE_LIBRARY_VALIDATION — set to 1 to sign with a built-in
+#       com.apple.security.cs.disable-library-validation entitlement (no plist to hand-write).
+#       Needed by a cgo binary that dlopens a third-party dylib (e.g. libfuse-t) under the
+#       hardened runtime. Ignored when MACOS_CODESIGN_ENTITLEMENTS is given (that wins).
 set -euo pipefail
 
 bin=$1
@@ -43,6 +45,10 @@ ents_args=()
 if [ -n "${MACOS_CODESIGN_ENTITLEMENTS:-}" ]; then
   test -f "$MACOS_CODESIGN_ENTITLEMENTS" || { echo "::error::MACOS_CODESIGN_ENTITLEMENTS=$MACOS_CODESIGN_ENTITLEMENTS not found"; exit 1; }
   ents_args=(--entitlements "$MACOS_CODESIGN_ENTITLEMENTS")
+elif [ "${MACOS_CODESIGN_DISABLE_LIBRARY_VALIDATION:-}" = "1" ]; then
+  ent="$(mktemp -d)/disable-library-validation.entitlements"
+  printf '%s' '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.cs.disable-library-validation</key><true/></dict></plist>' > "$ent"
+  ents_args=(--entitlements "$ent")
 fi
 
 echo "macos-codesign: signing $bin ($target)"
