@@ -117,10 +117,36 @@ jobs:
           notary-key-id: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           notary-issuer-id: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
 
-      - uses: goreleaser/goreleaser-action@v7
+      # install-only puts the goreleaser binary on PATH so the next step can wrap
+      # `release` in a retry loop — a marketplace action step can't be retried in bash.
+      - name: Install goreleaser
+        uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
-          args: release --clean
+          install-only: true
+
+      - name: Release (retry past flaky notarization)
+        run: |
+          set -euo pipefail
+          # notarytool/quill is the flakiest step and runs BEFORE goreleaser publishes the GitHub
+          # release or pushes the tap, so the common transient case (a notarize blip) retries
+          # cleanly — nothing was published yet. A rarer failure mid-publish retries too; that
+          # asset re-upload is idempotent only if the repo's .goreleaser.yaml sets
+          # release.replace_existing_artifacts: true (the repo-bootstrap template does) — otherwise
+          # the retry surfaces a 422 and the release must be re-run after deleting the partial one.
+          # Retry up to 3x with backoff.
+          attempt=1
+          while :; do
+            if goreleaser release --clean; then
+              break
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "::error::goreleaser release failed after 3 attempts"; exit 1
+            fi
+            echo "::warning::goreleaser release failed (attempt $attempt/3); retrying in $((attempt * 60))s"
+            sleep "$((attempt * 60))"
+            attempt=$((attempt + 1))
+          done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

@@ -1,0 +1,344 @@
+# The single reusable PyPI release workflow for every Python repo in the fleet — the
+# Python sibling of release-go.yml. It owns the whole job: verify-tag-on-main (gate),
+# build (pure uv_build OR a maturin native-wheel matrix), OIDC trusted-publish to PyPI,
+# and a GitHub release. Each repo's release-pypi.yml collapses to a `uses:` + a few
+# `with:` inputs; all the logic lives here, pinned `@pypi-v1`.
+#
+# How a repo ships is decided by these inputs:
+#   • pure (default): flat uv_build package — `uv build` makes sdist+wheel.
+#     (cc-pushback, spawnllm, captain-hook, docker-dsl, dailies)
+#   • maturin: maturin:true builds native wheels across `maturin-matrix` + an sdist.
+#     (cc-transcript — PyO3; per-CPython wheels, NOT abi3). maturin requires version-strategy:tag,
+#     package-subdir:'.' (repo-root), and no pre-build — the build jobs fail fast otherwise.
+#   • continuous-deploy: version-strategy:auto-tag derives v<base>.<run_number> and
+#     skips the on-main gate; pair with package-subdir + a pre-build hook. (cc-sentiment)
+#
+# Auth is OIDC trusted publishing only — no API token anywhere. The PyPI publisher
+# config keys on the CALLER's workflow filename (release-pypi.yml) + environment `pypi`,
+# unchanged by this reusable-workflow conversion.
+#
+# Callers MUST use `secrets: inherit` (forwards GITHUB_TOKEN + any SENTRY_DSN a pre-build bakes).
+# Minimal callers:
+#   tag:      jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-pypi.yml@pypi-v1, secrets: inherit, with: { dist-name: capt-hook, python-version: "3.13" } } }
+#   maturin:  with: { maturin: true }
+#   auto-tag: on: { push: { branches: [main], paths: [client/**] } }
+#             with: { version-strategy: auto-tag, auto-tag-version-base: "0.2", package-subdir: client, pre-build: "..." }
+
+name: release-pypi (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      dist-name:
+        description: PyPI distribution name (the >latest-published guard's PKG). Defaults to the repo name; set it when dist != repo (capt-hook, dly).
+        type: string
+        default: ${{ github.event.repository.name }}
+      python-version:
+        description: python pin for setup-uv (distinct from the project's requires-python)
+        type: string
+        default: "3.13"
+      maturin:
+        description: build native wheels with maturin (PyO3) instead of a pure uv_build sdist+wheel
+        type: boolean
+        default: false
+      maturin-matrix:
+        description: 'JSON array of {id, os, target, manylinux} wheel targets (maturin only)'
+        type: string
+        default: '[{"id":"macos-arm64","os":"macos-latest","target":"aarch64-apple-darwin","manylinux":""},{"id":"macos-x86_64","os":"macos-15-intel","target":"x86_64-apple-darwin","manylinux":""},{"id":"linux-x86_64","os":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","manylinux":"2_28"},{"id":"linux-aarch64","os":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-gnu","manylinux":"2_28"}]'
+      maturin-args:
+        description: args passed to PyO3/maturin-action (maturin only)
+        type: string
+        default: --release --out dist
+      macosx-deployment-target:
+        description: MACOSX_DEPLOYMENT_TARGET for maturin macOS wheels
+        type: string
+        default: "11.0"
+      sccache:
+        description: enable sccache in maturin-action ("true"/"false")
+        type: string
+        default: "true"
+      version-strategy:
+        description: '"tag" (version from the pushed v* tag) or "auto-tag" (v<base>.<run_number>, skips the on-main gate)'
+        type: string
+        default: tag
+      auto-tag-version-base:
+        description: major.minor prefix for version-strategy:auto-tag (patch = github.run_number)
+        type: string
+        default: "0.1"
+      package-subdir:
+        description: subdirectory holding the package (build runs there); "." for a repo-root package
+        type: string
+        default: "."
+      pre-build:
+        description: 'repo-specific shell run after the version is set and before build (e.g. bake a Sentry DSN); runs from the repo root with SENTRY_DSN in env'
+        type: string
+        default: ""
+      check-version:
+        description: fail unless the tag exceeds the latest version already on PyPI (tag mode only)
+        type: boolean
+        default: true
+      run-tests:
+        description: run `uv run --extra dev pytest` before building (pure path)
+        type: boolean
+        default: false
+
+jobs:
+  verify-tag-on-main:
+    # Gate: the tagged commit must be on main. Skipped in auto-tag (continuous-deploy)
+    # mode — the build jobs below tolerate the skip via `!failure()`.
+    if: ${{ inputs.version-strategy == 'tag' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@v1
+
+  build:
+    # Pure uv_build path. Runs when the gate succeeded (tag mode) or was skipped (auto-tag).
+    needs: [verify-tag-on-main]
+    if: ${{ !cancelled() && !failure() && !inputs.maturin }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache-dependency-glob: ${{ inputs.package-subdir == '.' && 'uv.lock' || format('{0}/uv.lock', inputs.package-subdir) }}
+
+      - name: Resolve version
+        id: ver
+        env:
+          VERSION_STRATEGY: ${{ inputs.version-strategy }}
+          VERSION_BASE: ${{ inputs.auto-tag-version-base }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if [ "$VERSION_STRATEGY" = "auto-tag" ]; then
+            VERSION="${VERSION_BASE}.${RUN_NUMBER}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Tag must exceed the latest published version
+        if: ${{ inputs.check-version && inputs.version-strategy == 'tag' }}
+        env:
+          PKG: ${{ inputs.dist-name }}
+        run: |
+          uv run --no-project --with packaging python - "$GITHUB_REF_NAME" "$PKG" <<'PY'
+          import sys, json, urllib.request
+          from packaging.version import Version
+          tag = sys.argv[1].removeprefix("v"); pkg = sys.argv[2]
+          try:
+              latest = json.load(urllib.request.urlopen(f"https://pypi.org/pypi/{pkg}/json"))["info"]["version"]
+          except Exception:
+              latest = "0.0.0"  # first release / never published
+          if Version(tag) <= Version(latest):
+              sys.exit(f"::error::tag {tag} ({pkg}) is not greater than latest published {latest}")
+          print(f"OK: {tag} > {latest}")
+          PY
+
+      - name: Set version from tag
+        working-directory: ${{ inputs.package-subdir }}
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: uv version --frozen "$VERSION"
+
+      - name: Repo-specific pre-build
+        if: ${{ inputs.pre-build != '' }}
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: ${{ inputs.pre-build }}
+
+      - name: Run tests
+        if: ${{ inputs.run-tests }}
+        working-directory: ${{ inputs.package-subdir }}
+        run: uv run --extra dev pytest
+
+      - name: Build sdist + wheel
+        working-directory: ${{ inputs.package-subdir }}
+        run: uv build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: ${{ inputs.package-subdir }}/dist/*
+          if-no-files-found: error
+
+  build_wheels:
+    # maturin native-wheel matrix (per-CPython, not abi3).
+    needs: [verify-tag-on-main]
+    if: ${{ !cancelled() && !failure() && inputs.maturin }}
+    name: Build ${{ matrix.id }} wheel
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.maturin-matrix) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate maturin inputs
+        env:
+          VERSION_STRATEGY: ${{ inputs.version-strategy }}
+          PACKAGE_SUBDIR: ${{ inputs.package-subdir }}
+          PRE_BUILD: ${{ inputs.pre-build }}
+        run: |
+          set -euo pipefail
+          [ "$VERSION_STRATEGY" = "tag" ] || { echo "::error::maturin requires version-strategy: tag"; exit 1; }
+          [ "$PACKAGE_SUBDIR" = "." ] || { echo "::error::maturin requires package-subdir: '.' (repo-root)"; exit 1; }
+          [ -z "$PRE_BUILD" ] || { echo "::error::maturin does not support pre-build"; exit 1; }
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache-dependency-glob: uv.lock
+
+      - name: Set version from tag
+        run: uv version --frozen "${GITHUB_REF_NAME#v}"
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: ${{ inputs.maturin-args }}
+          manylinux: ${{ matrix.manylinux }}
+          sccache: ${{ inputs.sccache }}
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ inputs.macosx-deployment-target }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ matrix.id }}
+          path: ./dist/*.whl
+          if-no-files-found: error
+
+  build_sdist:
+    # maturin sdist (one, on ubuntu).
+    needs: [verify-tag-on-main]
+    if: ${{ !cancelled() && !failure() && inputs.maturin }}
+    name: Build sdist
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate maturin inputs
+        env:
+          VERSION_STRATEGY: ${{ inputs.version-strategy }}
+          PACKAGE_SUBDIR: ${{ inputs.package-subdir }}
+          PRE_BUILD: ${{ inputs.pre-build }}
+        run: |
+          set -euo pipefail
+          [ "$VERSION_STRATEGY" = "tag" ] || { echo "::error::maturin requires version-strategy: tag"; exit 1; }
+          [ "$PACKAGE_SUBDIR" = "." ] || { echo "::error::maturin requires package-subdir: '.' (repo-root)"; exit 1; }
+          [ -z "$PRE_BUILD" ] || { echo "::error::maturin does not support pre-build"; exit 1; }
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache-dependency-glob: uv.lock
+
+      - name: Tag must exceed the latest published version
+        if: ${{ inputs.check-version && inputs.version-strategy == 'tag' }}
+        env:
+          PKG: ${{ inputs.dist-name }}
+        run: |
+          uv run --no-project --with packaging python - "$GITHUB_REF_NAME" "$PKG" <<'PY'
+          import sys, json, urllib.request
+          from packaging.version import Version
+          tag = sys.argv[1].removeprefix("v"); pkg = sys.argv[2]
+          try:
+              latest = json.load(urllib.request.urlopen(f"https://pypi.org/pypi/{pkg}/json"))["info"]["version"]
+          except Exception:
+              latest = "0.0.0"  # first release / never published
+          if Version(tag) <= Version(latest):
+              sys.exit(f"::error::tag {tag} ({pkg}) is not greater than latest published {latest}")
+          print(f"OK: {tag} > {latest}")
+          PY
+
+      - name: Set version from tag
+        run: uv version --frozen "${GITHUB_REF_NAME#v}"
+
+      - name: Build sdist
+        run: uv build --sdist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    # OIDC trusted publishing — no token. Runs once the active build path (pure OR maturin)
+    # succeeded; the inactive path's jobs are skipped, which !failure() tolerates. It also
+    # needs the gate so a FAILED verify-tag-on-main (tag off main) blocks publish — without
+    # it, the build jobs skip (not fail) and !failure() would wrongly let publish proceed.
+    needs: [verify-tag-on-main, build, build_wheels, build_sdist]
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve tag
+        id: ver
+        env:
+          VERSION_STRATEGY: ${{ inputs.version-strategy }}
+          VERSION_BASE: ${{ inputs.auto-tag-version-base }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if [ "$VERSION_STRATEGY" = "auto-tag" ]; then
+            echo "tag=v${VERSION_BASE}.${RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist*
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION_STRATEGY: ${{ inputs.version-strategy }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          args=(--title "$TAG" --generate-notes --latest --repo "$REPO")
+          if [ "$VERSION_STRATEGY" = "auto-tag" ]; then
+            args+=(--target "$SHA")
+          fi
+          gh release create "$TAG" "${args[@]}" dist/*

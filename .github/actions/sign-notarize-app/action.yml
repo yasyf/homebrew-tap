@@ -94,9 +94,24 @@ runs:
         test -n "${MACOS_NOTARY_KEY_FILE:-}" || { echo "::warning::no notary key — shipping signed-but-not-notarized"; notarize=0; }
         if [ "$notarize" = "1" ]; then
           ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
-            --key "$MACOS_NOTARY_KEY_FILE" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER" \
-            --wait --timeout 20m --output-format json > "$RUNNER_TEMP/notary.json"
+          # notarytool's submit/upload is the flakiest step (network, Apple 5xx, timeout); the cask
+          # publishes only after notarization succeeds, so a clean retry is safe. Retry the submit up
+          # to 3x with backoff; a SUCCESSFUL submit returning a non-Accepted status is a terminal
+          # verdict on the bundle (handled below, fail loud), not retried.
+          attempt=1
+          while :; do
+            if xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+              --key "$MACOS_NOTARY_KEY_FILE" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER" \
+              --wait --timeout 20m --output-format json > "$RUNNER_TEMP/notary.json"; then
+              break
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "::error::notarytool submit failed for $APP after 3 attempts"; exit 1
+            fi
+            echo "::warning::notarytool submit failed for $APP (attempt $attempt/3); retrying in $((attempt * 30))s"
+            sleep "$((attempt * 30))"
+            attempt=$((attempt + 1))
+          done
           cat "$RUNNER_TEMP/notary.json"
           sid="$(plutil -extract id raw -o - "$RUNNER_TEMP/notary.json")"
           if [ "$(plutil -extract status raw -o - "$RUNNER_TEMP/notary.json")" != "Accepted" ]; then

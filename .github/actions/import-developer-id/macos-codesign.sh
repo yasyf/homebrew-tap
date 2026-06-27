@@ -65,11 +65,26 @@ if [ -n "${MACOS_NOTARY_KEY_FILE:-}" ]; then
   # FAIL LOUD unless status == Accepted, dumping the per-issue log (the only place the
   # rejection reason appears).
   out="$(mktemp -d)/notary.json"
-  xcrun notarytool submit "$zip" \
-    --key "$MACOS_NOTARY_KEY_FILE" \
-    --key-id "$MACOS_NOTARY_KEY_ID" \
-    --issuer "$MACOS_NOTARY_ISSUER" \
-    --wait --timeout 20m --output-format json > "$out"
+  # notarytool's submit/upload is the flakiest step (network, Apple 5xx, timeout); the release
+  # only publishes after notarization succeeds, so a clean retry is safe. Retry the submit up to
+  # 3x with backoff. A SUCCESSFUL submit that returns a non-Accepted status is a terminal verdict
+  # on the binary, not a hiccup — that is handled below (fail loud), never retried.
+  attempt=1
+  while :; do
+    if xcrun notarytool submit "$zip" \
+      --key "$MACOS_NOTARY_KEY_FILE" \
+      --key-id "$MACOS_NOTARY_KEY_ID" \
+      --issuer "$MACOS_NOTARY_ISSUER" \
+      --wait --timeout 20m --output-format json > "$out"; then
+      break
+    fi
+    if [ "$attempt" -ge 3 ]; then
+      echo "::error::notarytool submit failed for $bin after 3 attempts"; exit 1
+    fi
+    echo "::warning::notarytool submit failed for $bin (attempt $attempt/3); retrying in $((attempt * 30))s"
+    sleep "$((attempt * 30))"
+    attempt=$((attempt + 1))
+  done
   cat "$out"
   sid="$(plutil -extract id raw -o - "$out")"
   if [ "$(plutil -extract status raw -o - "$out")" != "Accepted" ]; then
