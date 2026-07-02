@@ -1,0 +1,88 @@
+name: Sign, notarize, package a macOS CLI binary
+description: >-
+  The shared tail for shipping a bare Mach-O CLI as a Homebrew cask: Developer ID
+  codesign + notarize it via $MACOS_CODESIGN_SCRIPT (the canonical macos-codesign.sh
+  — graceful no-op unsigned, 3x submit retry, fail-loud on a non-Accepted verdict),
+  ditto-zip it into dist/<name>-<tag>-darwin-universal.zip with a .sha256 and a
+  checksums.txt, and (by default) create/attach to the tag's GitHub release.
+  Outputs the zip's sha256 for the cask render. A bare binary cannot be stapled
+  (stapler is .app/.dmg/.pkg-only); Gatekeeper verifies the notarization against
+  the cdhash online, same as the Go pipeline's quill path. Language-agnostic —
+  any Mach-O CLI (Swift, Rust, C) works. Requires the import-developer-id action
+  to have run first (it exports $MACOS_CODESIGN_SCRIPT even on an unsigned build).
+  Pair with render-formula (Casks/<name>.rb, filling __SHA__) + publish.
+
+inputs:
+  binary:
+    description: path to the built CLI binary
+    required: true
+  name:
+    description: cask/asset base name (the zip is dist/<name>-<tag>-darwin-universal.zip)
+    required: true
+  tag:
+    description: release tag the asset belongs to (explicit — github.ref_name is wrong under auto-tag)
+    required: true
+  attach-to-release:
+    description: attach the zip + its .sha256 + checksums.txt to the tag's release
+    required: false
+    default: "true"
+  release-notes:
+    description: >-
+      generate release notes when attaching. Defaults true — unlike
+      sign-notarize-app, whose caller's goreleaser usually creates the release
+      first, this action's workflow (release-swift.yml) creates the release here.
+    required: false
+    default: "true"
+
+outputs:
+  sha256:
+    description: sha256 of the shipped zip (feed to render-formula as __SHA__)
+    value: ${{ steps.pkg.outputs.sha256 }}
+  zip:
+    description: path to the shipped zip asset
+    value: ${{ steps.pkg.outputs.zip }}
+
+runs:
+  using: composite
+  steps:
+    - id: pkg
+      shell: bash
+      env:
+        BINARY: ${{ inputs.binary }}
+        NAME: ${{ inputs.name }}
+        TAG: ${{ inputs.tag }}
+      run: |
+        set -euo pipefail
+        test -f "$BINARY" || { echo "::error::binary '$BINARY' not found"; exit 1; }
+        test -n "${MACOS_CODESIGN_SCRIPT:-}" || { echo "::error::MACOS_CODESIGN_SCRIPT unset — run the import-developer-id action first"; exit 1; }
+        if [ -z "${MACOS_SIGN_IDENTITY:-}" ]; then
+          echo "::warning::no signing identity — shipping an unsigned binary (set the MACOS_* secrets to sign + notarize)"
+        fi
+
+        # Sign + notarize in one call. The script keys on the darwin_ prefix only;
+        # darwin_all names the universal slice honestly.
+        bash "$MACOS_CODESIGN_SCRIPT" "$BINARY" darwin_all
+
+        # ditto -c -k archives the bare binary at the zip root — exactly where the
+        # cask's `binary` stanza expects it.
+        mkdir -p dist
+        zip="dist/${NAME}-${TAG}-darwin-universal.zip"
+        ditto -c -k "$BINARY" "$zip"
+        sha="$(shasum -a 256 "$zip" | awk '{print $1}')"
+        shasum -a 256 "$zip" > "$zip.sha256"
+        (cd dist && shasum -a 256 -- *.zip > checksums.txt)
+        echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+        echo "zip=$zip" >> "$GITHUB_OUTPUT"
+        echo "sign-notarize-binary: $zip ($sha)"
+
+    - name: Attach the zip to the release
+      if: ${{ inputs.attach-to-release == 'true' }}
+      uses: softprops/action-gh-release@v3
+      with:
+        tag_name: ${{ inputs.tag }}
+        files: |
+          ${{ steps.pkg.outputs.zip }}
+          ${{ steps.pkg.outputs.zip }}.sha256
+          dist/checksums.txt
+        generate_release_notes: ${{ inputs.release-notes == 'true' }}
+        prerelease: ${{ contains(inputs.tag, '-') }}

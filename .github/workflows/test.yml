@@ -114,6 +114,73 @@ jobs:
           fi
           "$RUNNER_TEMP/hello-bin"
 
+      # --- Swift family (macOS leg only: swift/lipo/ditto are darwin tools) ---
+
+      - name: Scaffold a hello Swift package
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/swift-hello/Sources/swift-hello"
+          cd "$RUNNER_TEMP/swift-hello"
+          {
+            echo '// swift-tools-version: 6.0'
+            echo 'import PackageDescription'
+            echo 'let package = Package('
+            echo '    name: "swift-hello",'
+            echo '    targets: [.executableTarget(name: "swift-hello")]'
+            echo ')'
+          } > Package.swift
+          echo 'print("hello from swift")' > Sources/swift-hello/main.swift
+
+      - name: build-swift-universal on the hello package
+        if: runner.os == 'macOS'
+        id: swift-build
+        uses: ./.github/actions/build-swift-universal
+        with:
+          product: swift-hello
+          package-path: ${{ runner.temp }}/swift-hello
+
+      - name: Assert the universal binary
+        if: runner.os == 'macOS'
+        env:
+          BINARY: ${{ steps.swift-build.outputs.binary }}
+        run: |
+          set -euo pipefail
+          archs="$(lipo -archs "$BINARY")"
+          if ! grep -q arm64 <<<"$archs" || ! grep -q x86_64 <<<"$archs"; then
+            echo "::error::expected a universal binary, lipo -archs: $archs"; exit 1
+          fi
+          out="$("$BINARY")"
+          [ "$out" = "hello from swift" ] || { echo "::error::unexpected binary output '$out'"; exit 1; }
+
+      - name: sign-notarize-binary without an identity (unsigned path)
+        if: runner.os == 'macOS'
+        id: swift-pkg
+        uses: ./.github/actions/sign-notarize-binary
+        with:
+          binary: ${{ steps.swift-build.outputs.binary }}
+          name: swift-hello
+          tag: v9.9.9
+          attach-to-release: "false"
+
+      - name: Assert the packaged zip
+        if: runner.os == 'macOS'
+        env:
+          ZIP: ${{ steps.swift-pkg.outputs.zip }}
+          SHA: ${{ steps.swift-pkg.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          [ "$ZIP" = "dist/swift-hello-v9.9.9-darwin-universal.zip" ] || { echo "::error::unexpected zip path '$ZIP'"; exit 1; }
+          [ -f "$ZIP" ] || { echo "::error::zip missing"; exit 1; }
+          [ -f "$ZIP.sha256" ] || { echo "::error::.sha256 missing"; exit 1; }
+          recomputed="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+          [ "$SHA" = "$recomputed" ] || { echo "::error::sha256 output ($SHA) != recomputed ($recomputed)"; exit 1; }
+          grep -q 'swift-hello-v9.9.9-darwin-universal.zip' dist/checksums.txt || { echo "::error::zip not in checksums.txt"; exit 1; }
+          # The cask's `binary` stanza needs the binary at the zip root, executable.
+          ditto -x -k "$ZIP" "$RUNNER_TEMP/swift-unzipped"
+          out="$("$RUNNER_TEMP/swift-unzipped/swift-hello")"
+          [ "$out" = "hello from swift" ] || { echo "::error::unzipped binary broken (output '$out')"; exit 1; }
+
       - name: render-formula fills the tokens
         id: render
         uses: ./.github/actions/render-formula

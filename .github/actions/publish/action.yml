@@ -3,9 +3,10 @@ description: >-
   Merge rendered Homebrew formula/cask files into yasyf/homebrew-tap and push.
   The single source of the cross-repo git mechanics — a calling repo only renders
   its own .rb files (formula/cask content is repo-specific) and hands them here.
-  Repos that release plain binaries should use goreleaser's built-in cask
-  publishing instead; this action is for formula repos that goreleaser can't serve
-  (a `service` block, a native-Linux build, etc.).
+  Go repos that release plain binaries should use goreleaser's built-in cask
+  publishing instead; this action is for artifacts goreleaser can't serve — a
+  formula with a `service` block or native-Linux build, an externally-built
+  `.app`, or a non-goreleaser toolchain (release-swift.yml's binary cask).
 
 inputs:
   token:

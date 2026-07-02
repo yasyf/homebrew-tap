@@ -1,0 +1,71 @@
+name: Build a universal Swift binary
+description: >-
+  Build an SPM executable product as a universal (arm64 + x86_64) release binary
+  with one `swift build` invocation, locate it via --show-bin-path, and assert
+  both slices are present. The Swift analogue of goreleaser's build stage
+  (goreleaser has no Swift builder). macOS runners only — darwin binaries need
+  the Xcode toolchain, and the toolchain must be new enough for the package's
+  swift-tools-version (release-swift.yml selects Xcode before calling this).
+
+inputs:
+  product:
+    description: SPM executable product name (must exist in Package.swift)
+    required: true
+  package-path:
+    description: directory containing Package.swift
+    required: false
+    default: "."
+
+outputs:
+  binary:
+    description: absolute path to the built universal binary
+    value: ${{ steps.build.outputs.binary }}
+
+runs:
+  using: composite
+  steps:
+    - id: build
+      shell: bash
+      env:
+        PRODUCT: ${{ inputs.product }}
+        PACKAGE_PATH: ${{ inputs.package-path }}
+      run: |
+        set -euo pipefail
+        cd "$PACKAGE_PATH"
+
+        # Resolving dependencies is the network-flaky part (GitHub tarball fetches);
+        # retry it here so the build step below fails only on real compile errors.
+        attempt=1
+        while :; do
+          if swift package resolve; then
+            break
+          fi
+          if [ "$attempt" -ge 3 ]; then
+            echo "::error::swift package resolve failed after 3 attempts"; exit 1
+          fi
+          echo "::warning::swift package resolve failed (attempt $attempt/3); retrying in $((attempt * 15))s"
+          sleep "$((attempt * 15))"
+          attempt=$((attempt + 1))
+        done
+
+        # One invocation with both --arch flags emits a single universal binary.
+        # --product fails loud on a name mismatch instead of building everything.
+        swift build -c release --product "$PRODUCT" --arch arm64 --arch x86_64
+
+        # Locate the product dir with the SAME flags; --show-bin-path prints without
+        # rebuilding. Never hardcode .build/apple/Products/Release — the layout is an
+        # SPM implementation detail.
+        bindir="$(swift build -c release --product "$PRODUCT" --arch arm64 --arch x86_64 --show-bin-path)"
+        binary="$bindir/$PRODUCT"
+        test -f "$binary" || { echo "::error::built product not found at $binary"; exit 1; }
+
+        # A dropped --arch produces a thin binary that installs fine and breaks on the
+        # other architecture — assert both slices now, not in a user report.
+        archs="$(lipo -archs "$binary")"
+        case "$archs" in
+          *arm64*x86_64* | *x86_64*arm64*) ;;
+          *) echo "::error::$binary is not universal (lipo -archs: $archs)"; exit 1 ;;
+        esac
+
+        echo "binary=$binary" >> "$GITHUB_OUTPUT"
+        echo "build-swift-universal: $binary ($archs)"

@@ -1,0 +1,259 @@
+# The single reusable release workflow for every Swift CLI in the fleet. goreleaser
+# has no Swift builder, so this workflow owns the whole job by hand: verify-tag-on-main
+# (or auto-tag), Xcode selection, Developer ID import, a universal `swift build`,
+# native codesign + notarytool, the GitHub release, and a rendered binary cask pushed
+# to this tap. Each repo's release.yml collapses to a `uses:` line; all the logic
+# lives here, pinned `@swift-v1` (release-swift.yml does not exist at `v1` — Swift
+# callers must pin the swift family).
+#
+# Zero-config contract: every input defaults. The SPM executable product must be
+# named exactly the repo name (repo-bootstrap's swift layer scaffolds it that way);
+# desc/homepage come from the repo metadata in the push-event payload.
+#
+# Callers MUST use `secrets: inherit` (forwards HOMEBREW_TAP_TOKEN + the five MACOS_*).
+# Minimal caller:
+#   jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-swift.yml@swift-v1, secrets: inherit } }
+#
+# Signing is always the native codesign + notarytool path (the job already runs on a
+# macOS runner, so quill buys nothing); absent MACOS_* secrets the release ships
+# unsigned with a warning, same as the Go path. Bare binaries are notarized but not
+# stapled (stapler is .app/.dmg/.pkg-only) — the cask strips the quarantine xattr in
+# postflight, and Gatekeeper verifies the notarization against the cdhash online.
+
+name: release-swift (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: macOS runner for the release job (Swift + codesign + notarytool need macOS)
+        type: string
+        default: macos-15
+      xcode-version:
+        description: 'Xcode major to select from /Applications/Xcode_<v>*.app ("default" keeps the image default; macos-15 defaults to Xcode 16.x = Swift 6.1, too old for swift-tools-version 6.2)'
+        type: string
+        default: "26"
+      product:
+        description: SPM executable product / cask name (default = repo name)
+        type: string
+        default: ${{ github.event.repository.name }}
+      package-path:
+        description: directory containing Package.swift
+        type: string
+        default: "."
+      auto-tag:
+        description: 'release on push to main with a monotonic v0.1.<run_number> tag (skips verify-tag-on-main)'
+        type: boolean
+        default: false
+      pre-build:
+        description: 'repo-specific runner setup run before the build (install toolchains, echo env to $GITHUB_ENV)'
+        type: string
+        default: ""
+      run-tests:
+        description: run `swift test` before building (CI owns tests on every push; this re-runs them on the release toolchain)
+        type: boolean
+        default: false
+      description:
+        description: cask desc (default = the repo description, falling back to "<name> command-line tool")
+        type: string
+        default: ""
+      homepage:
+        description: cask homepage (default = the repo homepage, falling back to the repo URL)
+        type: string
+        default: ""
+      macos-floor:
+        description: 'Homebrew macOS floor symbol for depends_on (must match the platforms floor in Package.swift: .v15 -> sequoia)'
+        type: string
+        default: "sequoia"
+      cask-template:
+        description: 'path to a repo-provided cask .rb template (tokens __NAME__/__VERSION__/__SHA__/__DESC__/__HOMEPAGE__/__REPO__/__MACOS_FLOOR__); empty renders the standard binary cask'
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify the tag is on main
+        if: ${{ !inputs.auto-tag }}
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@swift-v1
+
+      - name: Resolve the release tag
+        id: tag
+        env:
+          AUTO_TAG: ${{ inputs.auto-tag }}
+        run: |
+          set -euo pipefail
+          if [ "$AUTO_TAG" = "true" ]; then
+            TAG="v0.1.${{ github.run_number }}"
+            git tag "$TAG"
+            git push origin "$TAG"
+          else
+            # goreleaser asserted this implicitly for Go; a hand-rolled release must
+            # be explicit or a branch-triggered misconfiguration ships a garbage tag.
+            case "$GITHUB_REF" in
+              refs/tags/v*) TAG="$GITHUB_REF_NAME" ;;
+              *) echo "::error::release-swift.yml must run on a v* tag push (got $GITHUB_REF) — or set auto-tag: true"; exit 1 ;;
+            esac
+          fi
+          {
+            echo "tag=$TAG"
+            echo "version=${TAG#v}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Guard against a same-named formula in the tap
+        env:
+          NAME: ${{ inputs.product }}
+        run: |
+          set -euo pipefail
+          if curl -fsS "https://raw.githubusercontent.com/yasyf/homebrew-tap/main/Formula/${NAME}.rb" -o /dev/null 2>/dev/null; then
+            echo "::error::Formula/${NAME}.rb already exists in the tap — a same-named cask makes 'brew install ${NAME}' ambiguous; rename the product or retire the formula"
+            exit 1
+          fi
+
+      - name: Select Xcode ${{ inputs.xcode-version }}
+        if: ${{ inputs.xcode-version != 'default' }}
+        env:
+          XCODE_VERSION: ${{ inputs.xcode-version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apps=(/Applications/Xcode_"${XCODE_VERSION}"*.app)
+          if [ "${#apps[@]}" -eq 0 ]; then
+            echo "::error::no /Applications/Xcode_${XCODE_VERSION}*.app on this runner; available:"
+            find /Applications -maxdepth 1 -name 'Xcode*.app' || true
+            exit 1
+          fi
+          app="$(printf '%s\n' "${apps[@]}" | sort -V | tail -1)"
+          sudo xcode-select -s "$app/Contents/Developer"
+          swift --version
+
+      - name: Repo-specific pre-build setup
+        if: ${{ inputs.pre-build != '' }}
+        run: ${{ inputs.pre-build }}
+
+      - name: Import Developer ID certificate
+        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@swift-v1
+        with:
+          p12: ${{ secrets.MACOS_SIGN_P12 }}
+          p12-password: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          notary-key: ${{ secrets.MACOS_NOTARY_KEY }}
+          notary-key-id: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          notary-issuer-id: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+
+      - name: Test
+        if: ${{ inputs.run-tests }}
+        env:
+          PACKAGE_PATH: ${{ inputs.package-path }}
+        run: |
+          set -euo pipefail
+          cd "$PACKAGE_PATH"
+          swift test
+
+      - name: Build the universal binary
+        id: build
+        uses: yasyf/homebrew-tap/.github/actions/build-swift-universal@swift-v1
+        with:
+          product: ${{ inputs.product }}
+          package-path: ${{ inputs.package-path }}
+
+      - name: Sign, notarize, package, release
+        id: pkg
+        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-binary@swift-v1
+        with:
+          binary: ${{ steps.build.outputs.binary }}
+          name: ${{ inputs.product }}
+          tag: ${{ steps.tag.outputs.tag }}
+
+      - name: Resolve cask metadata
+        id: meta
+        env:
+          DESCRIPTION: ${{ inputs.description }}
+          HOMEPAGE: ${{ inputs.homepage }}
+          PRODUCT: ${{ inputs.product }}
+          REPO_DESC: ${{ github.event.repository.description }}
+          REPO_HOMEPAGE: ${{ github.event.repository.homepage }}
+          REPO_URL: ${{ github.event.repository.html_url }}
+        run: |
+          set -euo pipefail
+          desc="${DESCRIPTION:-$REPO_DESC}"
+          desc="${desc:-$PRODUCT command-line tool}"
+          # The value rides through a sed 's|…|…|' substitution and lands in a Ruby
+          # double-quoted string — strip the delimiter, neutralize the quotes.
+          desc="$(printf '%s' "$desc" | tr -d '|' | tr '"' "'")"
+          home="${HOMEPAGE:-$REPO_HOMEPAGE}"
+          home="${home:-$REPO_URL}"
+          home="$(printf '%s' "$home" | tr -d '|"')"
+          {
+            echo "desc=$desc"
+            echo "homepage=$home"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Materialize the cask template
+        env:
+          CASK_TEMPLATE: ${{ inputs.cask-template }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CASK_TEMPLATE" ]; then
+            test -f "$CASK_TEMPLATE" || { echo "::error::cask-template '$CASK_TEMPLATE' not found"; exit 1; }
+            cp "$CASK_TEMPLATE" "$RUNNER_TEMP/cask.rb.tmpl"
+            exit 0
+          fi
+          # The standard binary cask: one universal artifact, no on_arm/on_intel split.
+          # postflight strips the quarantine xattr — essential for an unsigned fallback
+          # release, harmless (already passing Gatekeeper) for a notarized one.
+          cat > "$RUNNER_TEMP/cask.rb.tmpl" <<'EOF'
+          # This file was generated by release-swift.yml. DO NOT EDIT.
+          cask "__NAME__" do
+            version "__VERSION__"
+            sha256 "__SHA__"
+
+            url "https://github.com/__REPO__/releases/download/v#{version}/__NAME__-v#{version}-darwin-universal.zip"
+            name "__NAME__"
+            desc "__DESC__"
+            homepage "__HOMEPAGE__"
+
+            depends_on macos: ">= :__MACOS_FLOOR__"
+
+            binary "__NAME__"
+
+            postflight do
+              if OS.mac?
+                system_command "/usr/bin/xattr",
+                               args: ["-dr", "com.apple.quarantine", "#{staged_path}/__NAME__"]
+              end
+            end
+
+            livecheck do
+              skip "Auto-generated on release."
+            end
+          end
+          EOF
+
+      - name: Render the cask
+        uses: yasyf/homebrew-tap/.github/actions/render-formula@swift-v1
+        with:
+          template: ${{ runner.temp }}/cask.rb.tmpl
+          output: Casks/${{ inputs.product }}.rb
+          version: ${{ steps.tag.outputs.version }}
+          substitutions: |
+            __NAME__=${{ inputs.product }}
+            __SHA__=${{ steps.pkg.outputs.sha256 }}
+            __DESC__=${{ steps.meta.outputs.desc }}
+            __HOMEPAGE__=${{ steps.meta.outputs.homepage }}
+            __REPO__=${{ github.repository }}
+            __MACOS_FLOOR__=${{ inputs.macos-floor }}
+
+      - name: Publish the cask to the tap
+        uses: yasyf/homebrew-tap/.github/actions/publish@swift-v1
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          dir: tap-staging
+          message: "${{ inputs.product }} ${{ steps.tag.outputs.tag }}"
