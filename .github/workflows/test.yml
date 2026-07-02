@@ -115,6 +115,10 @@ jobs:
           "$RUNNER_TEMP/hello-bin"
 
       # --- Swift family (macOS leg only: swift/lipo/ditto are darwin tools) ---
+      # Known coverage gap: sign-notarize-binary's release-attach step (softprops)
+      # and release-swift.yml's auto-tag branch can't run here (both need a real
+      # tag + release). They're exercised only by consumer releases — touch them
+      # with extra care and validate on a scratch repo before repointing swift-v1.
 
       - name: Scaffold a hello Swift package
         if: runner.os == 'macOS'

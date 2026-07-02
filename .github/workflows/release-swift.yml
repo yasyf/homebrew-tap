@@ -19,6 +19,9 @@
 # unsigned with a warning, same as the Go path. Bare binaries are notarized but not
 # stapled (stapler is .app/.dmg/.pkg-only) — the cask strips the quarantine xattr in
 # postflight, and Gatekeeper verifies the notarization against the cdhash online.
+#
+# Hyphenated tags (v1.0.0-rc.1) publish a prerelease GitHub release and SKIP the
+# cask — brew has no prerelease channel, so the tap only ever advances on final tags.
 
 name: release-swift (reusable)
 
@@ -113,10 +116,20 @@ jobs:
           NAME: ${{ inputs.product }}
         run: |
           set -euo pipefail
-          if curl -fsS "https://raw.githubusercontent.com/yasyf/homebrew-tap/main/Formula/${NAME}.rb" -o /dev/null 2>/dev/null; then
-            echo "::error::Formula/${NAME}.rb already exists in the tap — a same-named cask makes 'brew install ${NAME}' ambiguous; rename the product or retire the formula"
-            exit 1
-          fi
+          # Explicit status handling — a bare `if curl -fsS` would fail OPEN on DNS
+          # errors, 429 throttling, or 5xx, silently skipping the guard.
+          code="$(curl -s -o /dev/null -w '%{http_code}' "https://raw.githubusercontent.com/yasyf/homebrew-tap/main/Formula/${NAME}.rb" || echo 000)"
+          case "$code" in
+            404) ;;
+            200)
+              echo "::error::Formula/${NAME}.rb already exists in the tap — a same-named cask makes 'brew install ${NAME}' ambiguous; rename the product or retire the formula"
+              exit 1
+              ;;
+            *)
+              echo "::error::formula collision check got HTTP ${code} from raw.githubusercontent.com — refusing to release blind; re-run when it recovers"
+              exit 1
+              ;;
+          esac
 
       - name: Select Xcode ${{ inputs.xcode-version }}
         if: ${{ inputs.xcode-version != 'default' }}
@@ -172,7 +185,12 @@ jobs:
           name: ${{ inputs.product }}
           tag: ${{ steps.tag.outputs.tag }}
 
+      # A hyphenated tag (v1.0.0-rc.1) publishes a PRERELEASE GitHub release; the
+      # cask must not advance to it — brew has no prerelease channel, so publishing
+      # would make the rc the live `brew install` version (goreleaser's
+      # skip_upload: auto draws the same line for the Go casks).
       - name: Resolve cask metadata
+        if: ${{ !contains(steps.tag.outputs.tag, '-') }}
         id: meta
         env:
           DESCRIPTION: ${{ inputs.description }}
@@ -185,18 +203,25 @@ jobs:
           set -euo pipefail
           desc="${DESCRIPTION:-$REPO_DESC}"
           desc="${desc:-$PRODUCT command-line tool}"
-          # The value rides through a sed 's|…|…|' substitution and lands in a Ruby
-          # double-quoted string — strip the delimiter, neutralize the quotes.
+          # The value rides through a sed 's|…|…|g' substitution and lands in a Ruby
+          # double-quoted string — strip the delimiter, neutralize the quotes, and
+          # escape sed's replacement-string specials (a bare '&' expands to the whole
+          # matched token, i.e. "Search & replace" would render "Search __DESC__ replace").
           desc="$(printf '%s' "$desc" | tr -d '|' | tr '"' "'")"
+          desc="${desc//\\/\\\\}"
+          desc="${desc//&/\\&}"
           home="${HOMEPAGE:-$REPO_HOMEPAGE}"
           home="${home:-$REPO_URL}"
           home="$(printf '%s' "$home" | tr -d '|"')"
+          home="${home//\\/\\\\}"
+          home="${home//&/\\&}"
           {
             echo "desc=$desc"
             echo "homepage=$home"
           } >> "$GITHUB_OUTPUT"
 
       - name: Materialize the cask template
+        if: ${{ !contains(steps.tag.outputs.tag, '-') }}
         env:
           CASK_TEMPLATE: ${{ inputs.cask-template }}
         run: |
@@ -238,6 +263,7 @@ jobs:
           EOF
 
       - name: Render the cask
+        if: ${{ !contains(steps.tag.outputs.tag, '-') }}
         uses: yasyf/homebrew-tap/.github/actions/render-formula@swift-v1
         with:
           template: ${{ runner.temp }}/cask.rb.tmpl
@@ -252,6 +278,7 @@ jobs:
             __MACOS_FLOOR__=${{ inputs.macos-floor }}
 
       - name: Publish the cask to the tap
+        if: ${{ !contains(steps.tag.outputs.tag, '-') }}
         uses: yasyf/homebrew-tap/.github/actions/publish@swift-v1
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
