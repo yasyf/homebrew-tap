@@ -40,7 +40,23 @@ First pinned point release of the Python family:
 - Because of the rename, `release-pypi-build.yml@v1` does not exist: Python
   callers pin `@pypi-v1`, Go callers pin `@v1`.
 
-## swift-v1.0.0 — 2026-07-02 (`4fc6a61`; `swift-v1` points here)
+## swift-v1.0.1 — 2026-07-02 (`b584afc`; `swift-v1` points here)
+
+Hardening from the adversarial review of the first release, all three
+confirmed by reproduction:
+
+- Cask metadata (`desc`/`homepage`) now escapes sed's replacement-string
+  specials (`&`, `\`) in addition to stripping the delimiter — a repo
+  description like "Search & replace CLI" previously rendered the token name
+  into the cask and failed the leftover-token guard.
+- The formula-collision guard fails closed: it switches on the explicit HTTP
+  status (404 = clear, 200 = collision, anything else = refuse to release
+  blind) instead of treating every curl failure as "no formula".
+- Hyphenated tags (prereleases) skip the cask render/publish — brew has no
+  prerelease channel, so the tap only advances on final tags (goreleaser
+  `skip_upload: auto` parity).
+
+## swift-v1.0.0 — 2026-07-02 (`4fc6a61`)
 
 First pinned point release of the Swift family:
 
