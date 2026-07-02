@@ -42,7 +42,7 @@ on:
         type: boolean
         default: false
       setup-zig:
-        description: 'mlugg/setup-zig version to install (e.g. "0.16.0"); empty to skip'
+        description: 'Zig version to install (e.g. "0.16.0"); empty to skip'
         type: string
         default: ""
       auto-tag:
@@ -73,7 +73,7 @@ jobs:
   release:
     runs-on: ${{ inputs.runner }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -94,7 +94,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - if: ${{ inputs.setup-zig != '' }}
-        uses: mlugg/setup-zig@v2
+        uses: xyzzylabs/setup-zig@v1
         with:
           version: ${{ inputs.setup-zig }}
 

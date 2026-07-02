@@ -19,7 +19,7 @@ jobs:
   actionlint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # shellcheck is preinstalled on the runner, so actionlint also lints the
       # workflows' inline run blocks (the actions' blocks are covered by the
       # inline-shell job — actionlint only sees workflows).
@@ -31,7 +31,7 @@ jobs:
   shellcheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: shellcheck the standalone scripts
         run: |
           set -euo pipefail
@@ -47,7 +47,7 @@ jobs:
   inline-shell:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Extract and shellcheck the composite actions' run blocks
         run: |
           set -euo pipefail
@@ -76,7 +76,7 @@ jobs:
         os: [ubuntu-latest, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version: stable
