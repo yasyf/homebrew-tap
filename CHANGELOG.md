@@ -1,13 +1,16 @@
 # Changelog
 
-Two independent tag families version the shared release infrastructure in
-`.github/`. Consumers pin a floating major (`@v1` or `@pypi-v1`); each move of a
-floating major is anchored by an immutable point tag (`v1.0.0`, `pypi-v1.0.0`, …).
+Three independent tag families version the shared release infrastructure in
+`.github/`. Consumers pin a floating major (`@v1`, `@pypi-v1`, or `@swift-v1`);
+each move of a floating major is anchored by an immutable point tag (`v1.0.0`,
+`pypi-v1.0.0`, `swift-v1.0.0`, …).
 
 - **`v1` family** — Go: the composite actions (`verify-tag-on-main`,
   `import-developer-id` + `macos-codesign.sh`, `render-formula`,
   `sign-notarize-app`, `publish`) and the `release-go.yml` reusable workflow.
 - **`pypi-v1` family** — Python: the `release-pypi-build.yml` reusable workflow.
+- **`swift-v1` family** — Swift: the `release-swift.yml` reusable workflow and
+  the `build-swift-universal` + `sign-notarize-binary` composite actions.
 
 ## v1.0.0 — 2026-07-01 (`07ab3a8`; `v1` points here)
 
@@ -36,6 +39,31 @@ First pinned point release of the Python family:
   against the workflow's `tag` output.
 - Because of the rename, `release-pypi-build.yml@v1` does not exist: Python
   callers pin `@pypi-v1`, Go callers pin `@v1`.
+
+## swift-v1.0.0 — 2026-07-02 (`4fc6a61`; `swift-v1` points here)
+
+First pinned point release of the Swift family:
+
+- `release-swift.yml`, the one parameterized release workflow every Swift CLI's
+  `release.yml` collapses to. goreleaser has no Swift builder, so the workflow
+  hand-rolls the job from the shared composite actions: verify-tag-on-main (or
+  auto-tag), Xcode selection (`Xcode_26*` glob on a `macos-15` runner), Developer
+  ID import, a universal `swift build`, native codesign + notarytool, the GitHub
+  release, and a rendered binary cask published to this tap. Zero-config: every
+  input defaults, and the SPM executable product is expected to carry the repo's
+  name.
+- `build-swift-universal`: one two-arch `swift build -c release`, product located
+  via `--show-bin-path` (never a hardcoded `.build/...` path), `lipo -archs`
+  slice assert, `swift package resolve` retried 3x.
+- `sign-notarize-binary`: the bare-Mach-O sibling of `sign-notarize-app` —
+  codesign + notarize via `$MACOS_CODESIGN_SCRIPT`, ditto-zip +
+  `.sha256`/`checksums.txt`, release attach with an explicit `tag_name`
+  (auto-tag-safe). No staple: a bare binary can't be stapled; Gatekeeper
+  verifies the cdhash online, matching the Go quill path. Unsigned builds warn
+  and ship, and the synthesized cask's postflight strips the quarantine xattr.
+- None of this exists at `v1`: Swift callers pin `@swift-v1`, and so does every
+  `uses:` inside `release-swift.yml` itself, so the Swift family repoints without
+  ever moving `v1`.
 
 ## Cutting a release (tag-move procedure)
 
