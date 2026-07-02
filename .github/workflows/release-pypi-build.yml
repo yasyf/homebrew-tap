@@ -13,8 +13,10 @@
 # How a repo ships (inputs):
 #   • pure (default): flat uv_build — `uv build` makes sdist+wheel.
 #   • maturin: maturin:true builds native wheels across `maturin-matrix` + an sdist
-#     (cc-transcript — PyO3; per-CPython wheels, NOT abi3). Requires version-strategy:tag,
-#     package-subdir:'.', and no pre-build — the build jobs fail fast otherwise.
+#     (cc-transcript — PyO3). The wheel ABI comes from the crate's pyo3 features, not this
+#     workflow: abi3-py313 → one cp313-abi3 wheel per platform; no abi3 feature → per-CPython.
+#     Requires version-strategy:tag, package-subdir:'.', and no pre-build — the build jobs
+#     fail fast otherwise.
 #   • continuous-deploy: version-strategy:auto-tag derives v<base>.<run_number> and skips
 #     the on-main gate; pair with package-subdir + a pre-build hook. (cc-sentiment)
 #
@@ -178,7 +180,8 @@ jobs:
           if-no-files-found: error
 
   build_wheels:
-    # maturin native-wheel matrix (per-CPython, not abi3).
+    # maturin native-wheel matrix (one wheel per target; ABI decided by the crate's
+    # pyo3 features — e.g. abi3-py313 → cp313-abi3).
     needs: [verify-tag-on-main]
     if: ${{ !cancelled() && !failure() && inputs.maturin }}
     name: Build ${{ matrix.id }} wheel
