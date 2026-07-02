@@ -12,8 +12,8 @@
 class CcPool < Formula
   desc "Predictive multi-account load-balancing for Claude Code"
   homepage "https://github.com/yasyf/cc-pool"
-  url "https://github.com/yasyf/cc-pool/releases/download/v0.35.1/cc-pool-v0.35.1-darwin-universal.tar.gz"
-  sha256 "19de9db1ad18f044af9c876a21b1e9b455a83daa06c225aff9ba8ba6bff8dc47" # pure
+  url "https://github.com/yasyf/cc-pool/releases/download/v0.36.0/cc-pool-v0.36.0-darwin-universal.tar.gz"
+  sha256 "344acfcd1e39c157e0ccda429e364d8d3e54e2b5741f86bc440890293af96e6e" # pure
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
