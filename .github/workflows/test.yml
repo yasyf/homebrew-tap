@@ -1,0 +1,154 @@
+# CI for the shared release infrastructure itself. Every fleet repo pins this
+# repo's actions/workflows @v1, so a regression here breaks every release at
+# once — lint all of it and exercise the safe (unsigned) action paths on both
+# runner OSes before a tag move ships a change to consumers.
+
+name: Test
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/**"]
+  pull_request:
+    paths: [".github/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # shellcheck is preinstalled on the runner, so actionlint also lints the
+      # workflows' inline run blocks (the actions' blocks are covered by the
+      # inline-shell job — actionlint only sees workflows).
+      - name: actionlint over .github/workflows/ (pinned)
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7 "$RUNNER_TEMP"
+          "$RUNNER_TEMP/actionlint" -color
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: shellcheck the standalone scripts
+        run: |
+          set -euo pipefail
+          checked=(
+            .github/actions/import-developer-id/macos-codesign.sh
+          )
+          shellcheck "${checked[@]}"
+          # Guard: every .sh under .github/ must be in the list above, so a new
+          # script can't dodge linting (a stale list entry fails too).
+          diff <(printf '%s\n' "${checked[@]}" | sort) <(find .github -type f -name '*.sh' | sort) \
+            || { echo "::error::.sh files under .github/ do not match the shellchecked list in test.yml (see diff above)"; exit 1; }
+
+  inline-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract and shellcheck the composite actions' run blocks
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/inline-shell"
+          for f in .github/actions/*/action.yml; do
+            action="$(basename "$(dirname "$f")")"
+            steps="$(yq '.runs.steps | length' "$f")"
+            for ((i = 0; i < steps; i++)); do
+              [ "$(yq ".runs.steps[$i] | has(\"run\")" "$f")" = "true" ] || continue
+              yq ".runs.steps[$i].run" "$f" > "$RUNNER_TEMP/inline-shell/${action}-step${i}.sh"
+            done
+          done
+          ls "$RUNNER_TEMP/inline-shell"/*.sh >/dev/null || { echo "::error::extracted no run blocks — the yq extraction is broken"; exit 1; }
+          # -s bash: every composite step declares `shell: bash`.
+          # SC2129 (style) excluded: per-line `>> "$GITHUB_OUTPUT"` appends are the
+          # actions idiom; grouping them obscures which output each line sets.
+          # No exclude for GitHub-expression interpolation on purpose: action inputs
+          # must flow via `env:`, never be interpolated into a run block, so an
+          # interpolation artifact tripping SC2296 is a real finding, not noise.
+          shellcheck -s bash -e SC2129 "$RUNNER_TEMP/inline-shell"/*.sh
+
+  exercise:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Build a hello-world binary
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/hello"
+          cd "$RUNNER_TEMP/hello"
+          printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("hello") }\n' > main.go
+          go mod init example.test/hello
+          go build -o "$RUNNER_TEMP/hello-bin" .
+          "$RUNNER_TEMP/hello-bin"
+
+      - name: import-developer-id without a p12 (unsigned path)
+        id: import
+        uses: ./.github/actions/import-developer-id
+
+      - name: Assert the unsigned no-op contract
+        env:
+          SIGNED: ${{ steps.import.outputs.signed }}
+        run: |
+          set -euo pipefail
+          [ "$SIGNED" = "false" ] || { echo "::error::signed should be 'false' without a p12, got '$SIGNED'"; exit 1; }
+          [ -n "${MACOS_CODESIGN_SCRIPT:-}" ] || { echo "::error::MACOS_CODESIGN_SCRIPT not exported"; exit 1; }
+          [ -x "$MACOS_CODESIGN_SCRIPT" ] || { echo "::error::$MACOS_CODESIGN_SCRIPT is not executable"; exit 1; }
+          # The script must no-op cleanly on an unsigned darwin build (this is how a
+          # goreleaser post-hook invokes it).
+          bash "$MACOS_CODESIGN_SCRIPT" "$RUNNER_TEMP/hello-bin" darwin_arm64
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # /bin/bash is 3.2 — the dialect the empty-array set -u expansion once
+            # regressed under; exercise it explicitly.
+            /bin/bash "$MACOS_CODESIGN_SCRIPT" "$RUNNER_TEMP/hello-bin" darwin_arm64
+          fi
+          "$RUNNER_TEMP/hello-bin"
+
+      - name: render-formula fills the tokens
+        id: render
+        uses: ./.github/actions/render-formula
+        with:
+          template: .github/test-fixtures/dummy.rb.tmpl
+          output: Formula/dummy.rb
+          version: 1.2.3
+          substitutions: |
+            __SHA_X__=0000000000000000000000000000000000000000000000000000000000000000
+
+      - name: Assert the rendered formula
+        env:
+          RENDERED: ${{ steps.render.outputs.file }}
+        run: |
+          set -euo pipefail
+          [ "$RENDERED" = "tap-staging/Formula/dummy.rb" ] || { echo "::error::unexpected output path '$RENDERED'"; exit 1; }
+          grep -q 'version "1.2.3"' "$RENDERED" || { echo "::error::__VERSION__ not filled"; exit 1; }
+          grep -q 'sha256 "0000000000000000000000000000000000000000000000000000000000000000"' "$RENDERED" || { echo "::error::__SHA_X__ not filled"; exit 1; }
+          ! grep -E '__[A-Z0-9_]+__' "$RENDERED" || { echo "::error::unfilled token in the rendered formula"; exit 1; }
+
+      - name: render-formula with a leftover token (must fail)
+        id: render-negative
+        continue-on-error: true
+        uses: ./.github/actions/render-formula
+        with:
+          template: .github/test-fixtures/dummy.rb.tmpl
+          output: Formula/dummy.rb
+          staging-dir: tap-staging-negative
+          version: 1.2.3
+
+      - name: Assert the leftover token failed the render
+        env:
+          # continue-on-error rewrites `conclusion` to success; `outcome` keeps
+          # the real result.
+          OUTCOME: ${{ steps.render-negative.outcome }}
+        run: |
+          set -euo pipefail
+          [ "$OUTCOME" = "failure" ] || { echo "::error::render-formula must fail on an unfilled __TOKEN__, got outcome '$OUTCOME'"; exit 1; }
