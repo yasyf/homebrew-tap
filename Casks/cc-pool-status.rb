@@ -9,8 +9,8 @@
 # pushed here on every tagged release — do not hand-edit; change the
 # template at .github/cask/cc-pool-status.rb.tmpl in cc-pool instead.
 cask "cc-pool-status" do
-  version "0.37.0"
-  sha256 "eeb042b58a6781c16fc2a07cbbf07cf35bc50290f9ea3b5f247b4d6fa744b215" # app
+  version "0.37.1"
+  sha256 "d4ad3c7bc8d8f72165b6b422803e83aa823b5265c2ffd35b7e22fa062799acd6" # app
 
   url "https://github.com/yasyf/cc-pool/releases/download/v#{version}/cc-pool-status-v#{version}-darwin.zip"
   name "cc-pool Status"
@@ -26,6 +26,7 @@ cask "cc-pool-status" do
 
   zap trash: [
     "~/Library/Containers/com.yasyf.cc-pool.status.widget",
+    "~/Library/Preferences/com.yasyf.cc-pool.status.plist", # login-item one-shot flag
   ]
 
   caveats <<~EOS
