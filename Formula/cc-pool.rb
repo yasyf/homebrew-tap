@@ -12,8 +12,8 @@
 class CcPool < Formula
   desc "Predictive multi-account load-balancing for Claude Code"
   homepage "https://github.com/yasyf/cc-pool"
-  url "https://github.com/yasyf/cc-pool/releases/download/v0.40.0/cc-pool-v0.40.0-darwin-universal.tar.gz"
-  sha256 "edd250f4e955ac28d303280770f14ec628b8bd3f9f27a78abdf5617992817c3b" # pure
+  url "https://github.com/yasyf/cc-pool/releases/download/v0.41.0/cc-pool-v0.41.0-darwin-universal.tar.gz"
+  sha256 "654c2ae716cb3a5485fa3799bac09c21f34acd7fb6597fad0411fc502ff1e531" # pure
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -68,6 +68,9 @@ class CcPool < Formula
 
       For the live-mirror overlay (fuse-t):
         ccp fuse enable
+
+      For the File Provider overlay (OS-managed domains):
+        ccp fp onboard
 
       Plain `claude` on ~/.claude keeps working untouched.
 

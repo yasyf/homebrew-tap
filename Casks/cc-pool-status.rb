@@ -9,8 +9,8 @@
 # pushed here on every tagged release — do not hand-edit; change the
 # template at .github/cask/cc-pool-status.rb.tmpl in cc-pool instead.
 cask "cc-pool-status" do
-  version "0.40.0"
-  sha256 "36346108fffa8ecee83072153df9486c1c8d0278ecb0dd6b8aaffca3695cf7aa" # app
+  version "0.41.0"
+  sha256 "8c7bc66939fa1aad04d238f85dfba256dc67eb0a85a626dd033c62921c24f2a8" # app
 
   url "https://github.com/yasyf/cc-pool/releases/download/v#{version}/cc-pool-status-v#{version}-darwin.zip"
   name "cc-pool Status"
@@ -21,6 +21,14 @@ cask "cc-pool-status" do
   depends_on formula: "cc-pool"
 
   app "CCPoolStatus.app"
+
+  postflight do
+    # An upgrade quits the running app while installing the fresh copy; relaunch
+    # it in the background so the widget and the File Provider extension come
+    # back without a manual reopen. Best-effort — a headless/no-GUI-session
+    # install must not fail the cask over a convenience relaunch.
+    system_command "/usr/bin/open", args: ["-g", "#{appdir}/CCPoolStatus.app"], must_succeed: false
+  end
 
   uninstall quit: "com.yasyf.cc-pool.status"
 
@@ -33,5 +41,9 @@ cask "cc-pool-status" do
     Launch the app once so macOS discovers the widget:
       open -ga CCPoolStatus
     Then: Notification Center (click the menu-bar clock) → Edit Widgets → "cc-pool".
+
+    For the File Provider overlay, run the guided setup:
+      ccp fp onboard
+    Health checks any time: ccp doctor
   EOS
 end
