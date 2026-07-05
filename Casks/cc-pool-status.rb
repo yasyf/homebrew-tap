@@ -1,7 +1,8 @@
 # Homebrew cask for the cc-pool Notification Center widget (CCPoolStatus.app).
 #
-# The app is Developer ID signed, notarized, and stapled, so a normal
-# quarantined install works. Install with `ccp widget`, or by hand:
+# The app is Developer ID signed, notarized, and stapled, so Gatekeeper
+# validates it offline; the postflight strips Homebrew's download quarantine so
+# the first launch is silent. Install with `ccp widget`, or by hand:
 #
 #   brew install --cask yasyf/tap/cc-pool-status
 #
@@ -9,8 +10,8 @@
 # pushed here on every tagged release — do not hand-edit; change the
 # template at .github/cask/cc-pool-status.rb.tmpl in cc-pool instead.
 cask "cc-pool-status" do
-  version "0.41.0"
-  sha256 "8c7bc66939fa1aad04d238f85dfba256dc67eb0a85a626dd033c62921c24f2a8" # app
+  version "0.42.0"
+  sha256 "096e0ae021d56a5e5cf1abb0e2918779a178df9ece45d12e8f8943d6af729523" # app
 
   url "https://github.com/yasyf/cc-pool/releases/download/v#{version}/cc-pool-status-v#{version}-darwin.zip"
   name "cc-pool Status"
@@ -23,10 +24,17 @@ cask "cc-pool-status" do
   app "CCPoolStatus.app"
 
   postflight do
-    # An upgrade quits the running app while installing the fresh copy; relaunch
-    # it in the background so the widget and the File Provider extension come
-    # back without a manual reopen. Best-effort — a headless/no-GUI-session
-    # install must not fail the cask over a convenience relaunch.
+    # Notarized + stapled, so Gatekeeper validates offline — but Homebrew's
+    # download quarantine still triggers a one-time "downloaded from the
+    # internet" dialog on first launch (and again on every upgrade's re-download).
+    # Strip it recursively (covers the hosted widget + File Provider appexes) so
+    # the relaunch is silent, then relaunch: an upgrade quit the old copy, and
+    # reopening restores the widget and File Provider extension without a manual
+    # reopen. Best-effort throughout — a headless/no-GUI-session install must not
+    # fail the cask over these convenience steps.
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/CCPoolStatus.app"],
+                   must_succeed: false
     system_command "/usr/bin/open", args: ["-g", "#{appdir}/CCPoolStatus.app"], must_succeed: false
   end
 
