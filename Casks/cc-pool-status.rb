@@ -10,8 +10,8 @@
 # pushed here on every tagged release — do not hand-edit; change the
 # template at .github/cask/cc-pool-status.rb.tmpl in cc-pool instead.
 cask "cc-pool-status" do
-  version "0.42.0"
-  sha256 "096e0ae021d56a5e5cf1abb0e2918779a178df9ece45d12e8f8943d6af729523" # app
+  version "0.43.0"
+  sha256 "d7580bc6e9a629ef9caed350108c9ab6320ed7bcad6c263a99d175ab9ac3806b" # app
 
   url "https://github.com/yasyf/cc-pool/releases/download/v#{version}/cc-pool-status-v#{version}-darwin.zip"
   name "cc-pool Status"
@@ -24,14 +24,7 @@ cask "cc-pool-status" do
   app "CCPoolStatus.app"
 
   postflight do
-    # Notarized + stapled, so Gatekeeper validates offline — but Homebrew's
-    # download quarantine still triggers a one-time "downloaded from the
-    # internet" dialog on first launch (and again on every upgrade's re-download).
-    # Strip it recursively (covers the hosted widget + File Provider appexes) so
-    # the relaunch is silent, then relaunch: an upgrade quit the old copy, and
-    # reopening restores the widget and File Provider extension without a manual
-    # reopen. Best-effort throughout — a headless/no-GUI-session install must not
-    # fail the cask over these convenience steps.
+    # Strip Homebrew's download quarantine so first launch is silent (notarized+stapled).
     system_command "/usr/bin/xattr",
                    args: ["-dr", "com.apple.quarantine", "#{appdir}/CCPoolStatus.app"],
                    must_succeed: false
