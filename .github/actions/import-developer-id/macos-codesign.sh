@@ -26,6 +26,12 @@
 #       com.apple.security.cs.disable-library-validation entitlement (no plist to hand-write).
 #       Needed by a cgo binary that dlopens a third-party dylib (e.g. libfuse-t) under the
 #       hardened runtime. Ignored when MACOS_CODESIGN_ENTITLEMENTS is given (that wins).
+#   MACOS_CODESIGN_IDENTIFIER   — optional explicit codesign --identifier for a bare CLI Mach-O
+#       granted a TCC permission. tccd keys the grant by the signing identifier only when it's
+#       reverse-DNS-shaped (dotted); codesign defaults it to the binary basename, and an undotted
+#       one (e.g. "cc-pool") makes tccd key on the absolute exec path instead — so every brew
+#       upgrade (new Cellar path) re-prompts. A dotted identifier is keyed once and survives
+#       upgrades. .app bundles don't need this (they key on CFBundleIdentifier).
 set -euo pipefail
 
 bin=$1
@@ -51,10 +57,15 @@ elif [ "${MACOS_CODESIGN_DISABLE_LIBRARY_VALIDATION:-}" = "1" ]; then
   ents_args=(--entitlements "$ent")
 fi
 
+id_args=()
+if [ -n "${MACOS_CODESIGN_IDENTIFIER:-}" ]; then
+  id_args=(--identifier "$MACOS_CODESIGN_IDENTIFIER")
+fi
+
 echo "macos-codesign: signing $bin ($target)"
 # ${arr[@]+"${arr[@]}"} expands to nothing when the array is empty — safe under `set -u`
 # on the macOS runner's bash 3.2, where a bare "${arr[@]}" on an empty array aborts.
-codesign --force --options runtime --timestamp ${ents_args[@]+"${ents_args[@]}"} -s "$MACOS_SIGN_IDENTITY" "$bin"
+codesign --force --options runtime --timestamp ${ents_args[@]+"${ents_args[@]}"} ${id_args[@]+"${id_args[@]}"} -s "$MACOS_SIGN_IDENTITY" "$bin"
 codesign --verify --strict --verbose=2 "$bin"
 
 if [ -n "${MACOS_NOTARY_KEY_FILE:-}" ]; then
