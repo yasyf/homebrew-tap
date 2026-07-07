@@ -10,8 +10,8 @@
 # pushed here on every tagged release — do not hand-edit; change the
 # template at .github/cask/cc-pool-status.rb.tmpl in cc-pool instead.
 cask "cc-pool-status" do
-  version "0.44.0"
-  sha256 "22d3c7d95c22c21654735fa2a000414b9626666dba28514c5ec585d721fca3a7" # app
+  version "0.44.1"
+  sha256 "06f9200caee44f0b09f3d8dc6c803ca7fda53435355342b7d12ca40575c9c144" # app
 
   url "https://github.com/yasyf/cc-pool/releases/download/v#{version}/cc-pool-status-v#{version}-darwin.zip"
   name "cc-pool Status"
