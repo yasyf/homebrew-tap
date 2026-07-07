@@ -10,8 +10,8 @@
 # pushed here on every tagged release — do not hand-edit; change the
 # template at .github/cask/cc-pool-status.rb.tmpl in cc-pool instead.
 cask "cc-pool-status" do
-  version "0.44.1"
-  sha256 "06f9200caee44f0b09f3d8dc6c803ca7fda53435355342b7d12ca40575c9c144" # app
+  version "0.45.0"
+  sha256 "b486fb7ac382d4f23bab1553a680900792e099126d5fab92b42771f5baf83c01" # app
 
   url "https://github.com/yasyf/cc-pool/releases/download/v#{version}/cc-pool-status-v#{version}-darwin.zip"
   name "cc-pool Status"
@@ -29,6 +29,11 @@ cask "cc-pool-status" do
                    args: ["-dr", "com.apple.quarantine", "#{appdir}/CCPoolStatus.app"],
                    must_succeed: false
     system_command "/usr/bin/open", args: ["-g", "#{appdir}/CCPoolStatus.app"], must_succeed: false
+    # Register + elect the File Provider appex so ccp can default to the FP
+    # backend with no System Settings visit; best-effort — `ccp fp onboard`
+    # re-attempts and `ccp doctor` names the Settings fallback.
+    system_command "/usr/bin/pluginkit", args: ["-a", "#{appdir}/CCPoolStatus.app/Contents/PlugIns/CCPoolFileProvider.appex"], must_succeed: false
+    system_command "/usr/bin/pluginkit", args: ["-e", "use", "-i", "com.yasyf.cc-pool.status.fileprovider"], must_succeed: false
   end
 
   uninstall quit: "com.yasyf.cc-pool.status"
