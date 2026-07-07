@@ -11,7 +11,7 @@
 class Ccx < Formula
   desc "Compact codebase-context tools for AI agents"
   homepage "https://github.com/yasyf/cc-context"
-  version "0.5.1"
+  version "0.6.0"
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -24,30 +24,31 @@ class Ccx < Formula
     depends_on "go" => :build
   end
 
-  # ast-grep powers the structural search/replace engine; uv (via uvx) runs semble
-  # for the semantic search/related ops. Both are required at runtime.
+  # ast-grep powers the structural search/replace engine; uv runs semble (via uvx)
+  # for the semantic search/related ops and the pydantic-monty driver for the
+  # ccx exec sandbox. Both are required at runtime.
   depends_on "ast-grep"
   depends_on "uv"
 
   on_macos do
     on_arm do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_darwin_arm64.tar.gz"
-      sha256 "2631f4ff0188c22f0ac774ee3b4b67381d52a4d5e3d4b9a1e50d0b92a5544287"
+      sha256 "b7f53e44f64baaec5992f66a8dd6851d9f1e153e90b74fda43538af300f792e2"
     end
     on_intel do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_darwin_amd64.tar.gz"
-      sha256 "e930ca68a38206c294ed06bbf2a2a924c3f7fe376a023c9afed000716b98ef6f"
+      sha256 "1712b0fbc747cf61dd60e23bfea626113f0155a14dd155f30513ef6c0275781c"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_linux_arm64.tar.gz"
-      sha256 "0cab2dc1a47ea5cdd07ea63ef267b89f9e9ad14ea83bd020509a3b8919c1ad6a"
+      sha256 "8d65e5b42fed1e7653124acf03ab98c6a3cedff26206644a52422030cfa9b2e9"
     end
     on_intel do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_linux_amd64.tar.gz"
-      sha256 "b18f305a18de3d37fe4513bb4b345599ff7836795f1bae817a1c6b793ebc5166"
+      sha256 "f5c9e38899615b557d649b6fb639fee626288d22fad76e2b16e3e0fba65f81f8"
     end
   end
 
