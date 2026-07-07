@@ -12,7 +12,20 @@ each move of a floating major is anchored by an immutable point tag (`v1.0.0`,
 - **`swift-v1` family** — Swift: the `release-swift.yml` reusable workflow and
   the `build-swift-universal` + `sign-notarize-binary` composite actions.
 
-## v1.0.0 — 2026-07-01 (`07ab3a8`; `v1` points here)
+## v1.1.0 — 2026-07-07 (`849c947`; `v1` points here)
+
+- `macos-codesign.sh` gains an optional `MACOS_CODESIGN_IDENTIFIER` — an explicit
+  `codesign --identifier` for a bare CLI Mach-O that holds a TCC privacy grant.
+  tccd keys the grant by the signing identifier only when it is reverse-DNS-shaped
+  (dotted); codesign otherwise defaults the identifier to the binary basename, and
+  an undotted basename makes tccd key on the absolute executable path — so every
+  `brew upgrade` (new Cellar path) is a fresh client and re-prompts. A stable dotted
+  identifier is keyed once and the grant survives upgrades. Unset leaves the
+  `codesign` command byte-identical (bash-3.2-safe empty-array expansion, like
+  `MACOS_CODESIGN_ENTITLEMENTS`). `.app` bundles don't need it (they key on
+  `CFBundleIdentifier`).
+
+## v1.0.0 — 2026-07-01 (`07ab3a8`)
 
 First pinned point release of the Go family, covering the series to date:
 
