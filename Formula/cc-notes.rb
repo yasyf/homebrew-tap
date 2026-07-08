@@ -15,7 +15,7 @@
 class CcNotes < Formula
   desc "Git-native notes and tasks layer for agents"
   homepage "https://github.com/yasyf/cc-notes"
-  version "0.21.0"
+  version "0.21.1"
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -31,23 +31,23 @@ class CcNotes < Formula
   on_macos do
     on_arm do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_arm64_fuse"
-      sha256 "489ba09a8d3db8e5ce73858ff863283c7c9ce0cfdcb9d960ffd348fff7ba5ed4"
+      sha256 "6c59f5411aee65e001e1b6de2569e42d1b1a3fce5f2cc105a8a01e9b04489a08"
     end
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_amd64_fuse"
-      sha256 "ba4efa37ae0a129f06227e516dc33cf92cbc36f2cf717e65bd8e2493ee4d6328"
+      sha256 "20d31067b7ae4fbfba02b62bb15e4f188d9ce0c30b58d8f907d9cd461aadf996"
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_amd64_fuse"
-      sha256 "795761e19515927776031f1fb07e30b75d80cd8c9959d81229a0b3c7b3e5e68f"
+      sha256 "2ef24c342dde656ed0f12789c223dcfd06addb8e6152ce605dc339418e68be49"
     end
     on_arm do
       # No FUSE variant ships for linux/arm64; this is the pure binary.
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_arm64"
-      sha256 "8903dbb6389fb238d5107df66d9763a47aa9b3013221721a09ae8eb6adebc1d5"
+      sha256 "7a41d0ffb0106ee1ed6f00ebc11bf23bfa888fbe3095d2ce6a7db0a81d60b7ae"
     end
   end
 
