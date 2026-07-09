@@ -12,7 +12,19 @@ each move of a floating major is anchored by an immutable point tag (`v1.0.0`,
 - **`swift-v1` family** — Swift: the `release-swift.yml` reusable workflow and
   the `build-swift-universal` + `sign-notarize-binary` composite actions.
 
-## v1.1.0 — 2026-07-07 (`849c947`; `v1` points here)
+## v1.1.1 — 2026-07-09 (`f010672`; `v1` points here)
+
+- `release-go.yml` auto-tag is idempotent, so a release that fails after the tag
+  is pushed can be rerun. The step tagged `v0.1.<run_number>` unconditionally, but
+  a rerun keeps the same run_number, so `git tag` aborted with exit 128 ("tag
+  already exists") and a release that died downstream (goreleaser on a missing
+  secret, a notarize blip past the retries) was stuck. The step now reuses a tag
+  already at the run's commit — checked against both the fetched clone and origin,
+  annotated or lightweight — fails loud on a tag at a different commit, and never
+  retags or forces. `GORELEASER_CURRENT_TAG` is exported on the reuse path too, so
+  the reused tag reaches goreleaser exactly as a freshly cut one.
+
+## v1.1.0 — 2026-07-07 (`849c947`)
 
 - `macos-codesign.sh` gains an optional `MACOS_CODESIGN_IDENTIFIER` — an explicit
   `codesign --identifier` for a bare CLI Mach-O that holds a TCC privacy grant.
