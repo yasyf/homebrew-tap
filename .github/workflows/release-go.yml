@@ -85,9 +85,37 @@ jobs:
         if: ${{ inputs.auto-tag }}
         run: |
           set -euo pipefail
+          # Reruns of a failed release keep the same run_number, so this must be
+          # idempotent: a tag already at THIS commit is reused (a release that died
+          # after the tag — e.g. goreleaser on a missing secret — stays rerunnable),
+          # a tag at a DIFFERENT commit is a real conflict that fails loud. We check
+          # both the fetched clone and origin, and never retag or force.
           TAG="v0.1.${{ github.run_number }}"
-          git tag "$TAG"
-          git push origin "$TAG"
+          SHA="$(git rev-parse HEAD)"
+          existing=""
+          if local_sha="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}")"; then
+            existing="$local_sha"
+          fi
+          # A ^{} refspec peels an annotated tag to its commit; a lightweight one
+          # (what this step creates) yields the plain line, whose sha is the commit.
+          remote_ls="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" || true)"
+          if [ -n "$remote_ls" ]; then
+            remote_sha="$(printf '%s\n' "$remote_ls" | awk '/\^\{\}$/ {print $1}' | tail -n1)"
+            [ -n "$remote_sha" ] || remote_sha="$(printf '%s\n' "$remote_ls" | awk 'NR==1 {print $1}')"
+            if [ -n "$existing" ] && [ "$existing" != "$remote_sha" ]; then
+              echo "::error::tag $TAG is $existing locally but $remote_sha on origin"; exit 1
+            fi
+            existing="$remote_sha"
+          fi
+          if [ -n "$existing" ]; then
+            if [ "$existing" != "$SHA" ]; then
+              echo "::error::tag $TAG already exists at $existing but this run targets $SHA; refusing to retag (delete the stale tag or re-run from a fresh push)"; exit 1
+            fi
+            echo "tag $TAG already exists at $SHA; reusing it (idempotent re-run)"
+          else
+            git tag "$TAG" "$SHA"
+            git push origin "$TAG"
+          fi
           echo "GORELEASER_CURRENT_TAG=$TAG" >> "$GITHUB_ENV"
 
       - if: ${{ inputs.setup-bun }}
