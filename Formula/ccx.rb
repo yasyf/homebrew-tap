@@ -1,6 +1,8 @@
 # Homebrew formula for ccx (cc-context). Installs the prebuilt binary for the
-# current platform from cc-context's GitHub Releases — no Go toolchain needed.
-# `brew install --HEAD` builds (pure Go) from source instead.
+# current platform from cc-context's GitHub Releases — no toolchain needed.
+# `brew install --HEAD` builds from source instead: the format engine is a WASM
+# blob built from Rust (the repo's `task wasm`), so the head block adds `rustup`
+# and `go-task` as build-only deps and runs the WASM build before the Go compile.
 #
 #   brew install yasyf/tap/ccx
 #
@@ -11,7 +13,7 @@
 class Ccx < Formula
   desc "Compact codebase-context tools for AI agents"
   homepage "https://github.com/yasyf/cc-context"
-  version "0.15.0"
+  version "0.16.0"
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -19,9 +21,16 @@ class Ccx < Formula
     strategy :github_latest
   end
 
+  # HEAD builds the format-core WASM engine from source (task wasm -> cargo -> a
+  # wasm32-unknown-unknown blob) and then the Go binary that go:embed's it.
+  # Homebrew's `rust` ships no wasm32 std, so HEAD depends on `rustup` and
+  # provisions the toolchain + target into the build sandbox, mirroring
+  # release.yml's pre-build.
   head do
     url "https://github.com/yasyf/cc-context.git", branch: "main"
     depends_on "go" => :build
+    depends_on "go-task" => :build
+    depends_on "rustup" => :build
   end
 
   # ast-grep powers the structural search/replace engine; uv runs semble (via uvx)
@@ -33,27 +42,35 @@ class Ccx < Formula
   on_macos do
     on_arm do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_darwin_arm64.tar.gz"
-      sha256 "137a358cad8f9dbd9df6d3f6f06aa7c489d1d77426ad0117cf7f2f9f3144efe7"
+      sha256 "6559110b49a0e72459d522a08b6d837446c8e5c9647006010858bba3c043c076"
     end
     on_intel do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_darwin_amd64.tar.gz"
-      sha256 "1ed3c84732041ffeb367e4335f5ab729c3dddf80a3ae9eee33393b798c06f41e"
+      sha256 "62dc1a4c9b77d06b8d2e2cbe352ed8db2cbc030ea49c46b0659b510b2a2af580"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_linux_arm64.tar.gz"
-      sha256 "f170005ff00d67fe1acd7e5fe79b0a642d954721eba791b4175c871ca50032c1"
+      sha256 "edcded6a306613f55337855f26affb2c258ca8edff5cfbac6417b4e2ce7f2ed7"
     end
     on_intel do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_linux_amd64.tar.gz"
-      sha256 "6bcdf45b2ff97399e6fbd7bb9bb9964f5509a1b576473c99ad7c88e5787d6b7c"
+      sha256 "1826805a348fc714b12b86910c497d3c11b310e5c974c6b6364350737437ec31"
     end
   end
 
   def install
     if build.head?
+      ENV["RUSTUP_HOME"] = "#{buildpath}/.rustup"
+      ENV["CARGO_HOME"] = "#{buildpath}/.cargo"
+      system "rustup", "toolchain", "install", "stable", "--profile", "minimal",
+             "--target", "wasm32-unknown-unknown"
+      system "rustup", "default", "stable"
+      # Build the go:embed'd format-core WASM engine (task wasm -> scripts/build-wasm.sh)
+      # before the Go compile that embeds it.
+      system "task", "wasm"
       ENV["CGO_ENABLED"] = "0"
       ldflags = "-s -w -X github.com/yasyf/cc-context/internal/version.Version=#{version}"
       system "go", "build", *std_go_args(ldflags: ldflags, output: bin/"ccx"), "./cmd/ccx"
