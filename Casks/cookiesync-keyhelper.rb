@@ -15,8 +15,8 @@
 # here on every tagged release — do not hand-edit; change the template at
 # cookiesync's .github/cask/cookiesync-keyhelper.rb.tmpl instead.
 cask "cookiesync-keyhelper" do
-  version "0.8.0"
-  sha256 "9eba35e041880c7a88b324100d49cf6135b8430919195f200c529cf1484905db" # app
+  version "0.14.0"
+  sha256 "5646dfa1801ae4eedffe7bf228d5841a9f0a35dc045f642ce512c5f7bcc8a9f5" # app
 
   url "https://github.com/yasyf/cookiesync/releases/download/v#{version}/cookiesync-keyhelper-v#{version}-darwin.zip"
   name "cookiesync key helper"
