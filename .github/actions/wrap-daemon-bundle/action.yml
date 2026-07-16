@@ -11,8 +11,9 @@ description: >-
   notarizes (fail-loud on any non-Accepted status), and staples. An
   entitlement-backed service (an app-group container socket) ADDITIONALLY needs
   an embedded Developer ID provisioning profile authorizing the claim — pass it
-  via provisioning-profile-b64 and this action asserts its Entitlements dict
-  carries com.apple.security.application-groups. Reuses the same notarytool +
+  via provisioning-profile-b64 and this action fails loud unless the profile's
+  Entitlements authorize every app group the entitlements plist claims. Reuses the
+  same notarytool +
   stapler tooling as sign-notarize-app, and reads MACOS_SIGN_IDENTITY +
   MACOS_NOTARY_* from the env, so the import-developer-id action MUST have run
   first. macOS runners only. Outputs the stapled .app path — the caller zips it
@@ -135,6 +136,29 @@ runs:
           ents=(--entitlements "$ENTITLEMENTS")
         fi
 
+        # Members of the application-groups array at keypath $2 of plist $1, one per line
+        # (empty when the key is absent). PlistBuddy walks the dotted entitlement key via ':'.
+        app_groups() {
+          local i=0 g
+          while g="$(/usr/libexec/PlistBuddy -c "Print $2:$i" "$1" 2>/dev/null)"; do
+            printf '%s\n' "$g"
+            i=$((i + 1))
+          done
+        }
+
+        # An app-group entitlement claim is authorized ONLY by an embedded Developer ID profile
+        # naming the SAME group; without it the daemon re-prompts on every upgrade. GitHub
+        # expands a missing/misnamed secret to "", so a claim with an empty profile must fail
+        # loud here rather than ship a bundle whose app-group claim is unauthorized.
+        claimed_groups=()
+        if [ -n "$ENTITLEMENTS" ]; then
+          while IFS= read -r g; do claimed_groups+=("$g"); done \
+            < <(app_groups "$ENTITLEMENTS" ":com.apple.security.application-groups")
+        fi
+        if [ "${#claimed_groups[@]}" -gt 0 ] && [ -z "$PROFILE_B64" ]; then
+          echo "::error::entitlements claim com.apple.security.application-groups but no provisioning-profile-b64 was provided — the app-group TCC claim would be unauthorized and the daemon would re-prompt"; exit 1
+        fi
+
         # Inside-out: the daemon Mach-O first, then the bundle. Hardened runtime + secure
         # timestamp. The bundle is --identifier'd as $BUNDLE_ID (matching CFBundleIdentifier)
         # so the designated requirement and the TCC client_type=0 key are the bundle id.
@@ -144,14 +168,17 @@ runs:
         codesign --force --options runtime --timestamp ${ents[@]+"${ents[@]}"} --identifier "$BUNDLE_ID" -s "$MACOS_SIGN_IDENTITY" "$app"
         codesign --verify --deep --strict --verbose=2 "$app"
 
-        # When a profile was embedded, prove it decodes and authorizes the app-group claim —
-        # a bundle that requests app groups without a profile authorizing them is exactly the
-        # silent-reprompt failure this action exists to prevent.
+        # When a profile was embedded, prove it decodes and authorizes EACH claimed app group —
+        # a profile that names some OTHER group (or none) is still the silent-reprompt failure
+        # this action exists to prevent, so match the specific ids, not just the key's presence.
         if [ -n "$PROFILE_B64" ]; then
           decoded="$RUNNER_TEMP/embedded.provisionprofile.plist"
           security cms -D -i "$app/Contents/embedded.provisionprofile" > "$decoded" || { echo "::error::security cms -D could not decode the embedded provisioning profile"; exit 1; }
-          /usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.security.application-groups" "$decoded" >/dev/null 2>&1 \
-            || { echo "::error::embedded provisioning profile's Entitlements has no com.apple.security.application-groups — the app-group TCC claim is not authorized"; exit 1; }
+          authorized="$(app_groups "$decoded" ":Entitlements:com.apple.security.application-groups")"
+          for c in ${claimed_groups[@]+"${claimed_groups[@]}"}; do
+            printf '%s\n' "$authorized" | grep -qxF -- "$c" \
+              || { echo "::error::embedded provisioning profile does not authorize app group '$c' claimed by the entitlements — the app-group TCC claim is not authorized"; exit 1; }
+          done
         fi
 
         # Notarize the bundle. notarytool submit --wait exits 0 even on an Invalid result,
