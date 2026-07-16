@@ -53,6 +53,7 @@ Xcode `.app`) and compose their own workflow:
 | `actions/import-developer-id@v1` | import the Developer ID cert into a throwaway keychain; export the signing env + `$MACOS_CODESIGN_SCRIPT` (the canonical `macos-codesign.sh`) — the single home of the keychain dance |
 | `actions/render-formula@v1` | fill a repo `.rb` template (`__VERSION__` / `__SHA_*__` / custom tokens) into a staging dir |
 | `actions/sign-notarize-app@v1` | sign + notarize + staple a built `.app`, zip it, attach to the release, output the zip's sha256 (pair with `render-formula` for its cask) |
+| `actions/wrap-daemon-bundle@v1` | wrap a bare Mach-O daemon in a minimal signed + notarized + stapled `.app` (with an embedded provisioning profile) so its TCC grant is keyed by `CFBundleIdentifier` and survives `brew upgrade` instead of re-prompting every release |
 | `actions/publish@v1` | merge a staging dir's `Formula/`/`Casks/` into this tap and push (idempotent) |
 | `actions/build-swift-universal@swift-v1` | build an SPM executable as a universal (arm64 + x86_64) release binary and assert both slices |
 | `actions/sign-notarize-binary@swift-v1` | codesign + notarize a bare Mach-O CLI via `$MACOS_CODESIGN_SCRIPT`, zip + checksum it, attach to the release (the `.app`-less sibling of `sign-notarize-app`) |

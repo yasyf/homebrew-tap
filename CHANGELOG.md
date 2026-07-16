@@ -7,10 +7,28 @@ each move of a floating major is anchored by an immutable point tag (`v1.0.0`,
 
 - **`v1` family** — Go: the composite actions (`verify-tag-on-main`,
   `import-developer-id` + `macos-codesign.sh`, `render-formula`,
-  `sign-notarize-app`, `publish`) and the `release-go.yml` reusable workflow.
+  `sign-notarize-app`, `wrap-daemon-bundle`, `publish`) and the `release-go.yml`
+  reusable workflow.
 - **`pypi-v1` family** — Python: the `release-pypi-build.yml` reusable workflow.
 - **`swift-v1` family** — Swift: the `release-swift.yml` reusable workflow and
   the `build-swift-universal` + `sign-notarize-binary` composite actions.
+
+## Unreleased (`v1` family)
+
+- New `wrap-daemon-bundle` composite action. It wraps a bare universal Mach-O
+  daemon in a minimal signed + notarized + stapled `.app` so the service's macOS
+  TCC grant is keyed by `CFBundleIdentifier` (`client_type=0`) and survives
+  `brew upgrade`, instead of the path-keyed (`client_type=1`) grant a bare Mach-O
+  earns — which resets to a fresh client every release and re-prompts the user.
+  Assembles `Info.plist` (`LSUIElement=true`, not `LSBackgroundOnly`) +
+  `Contents/MacOS/<exe>` + an optional embedded Developer ID provisioning profile,
+  codesigns with the bundle id as identifier (+ optional entitlements), notarizes
+  (fail-loud on non-Accepted), and staples. When a profile is embedded it asserts
+  the profile's `Entitlements` authorize `com.apple.security.application-groups`,
+  so an app-group service can't ship a bundle that silently re-prompts. Reads
+  `MACOS_SIGN_IDENTITY` / `MACOS_NOTARY_*` from the env like `sign-notarize-app`
+  (run `import-developer-id` first). Consumers pin `@v1` after the floating major
+  is force-moved onto the point tag that ships this.
 
 ## v1.1.1 — 2026-07-09 (`f010672`; `v1` points here)
 
