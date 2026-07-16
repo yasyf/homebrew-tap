@@ -1,0 +1,193 @@
+name: Wrap a daemon binary in a signed .app bundle
+description: >-
+  Wrap a universal Mach-O daemon in a minimal <bundle-name>.app so it earns a
+  DURABLE macOS TCC grant. tccd keys a bare Mach-O's grant by resolved path
+  (client_type=1), so every Homebrew upgrade (new Cellar path) mints a fresh TCC
+  client and RE-PROMPTS the user; a bundle is keyed by CFBundleIdentifier
+  (client_type=0) and the grant survives upgrades. Assembles the bundle
+  (Info.plist + Contents/MacOS/<executable-name> + optional
+  Contents/embedded.provisionprofile), Developer ID codesigns it (hardened
+  runtime, secure timestamp, identified as bundle-id, with optional entitlements),
+  notarizes (fail-loud on any non-Accepted status), and staples. An
+  entitlement-backed service (an app-group container socket) ADDITIONALLY needs
+  an embedded Developer ID provisioning profile authorizing the claim — pass it
+  via provisioning-profile-b64 and this action asserts its Entitlements dict
+  carries com.apple.security.application-groups. Reuses the same notarytool +
+  stapler tooling as sign-notarize-app, and reads MACOS_SIGN_IDENTITY +
+  MACOS_NOTARY_* from the env, so the import-developer-id action MUST have run
+  first. macOS runners only. Outputs the stapled .app path — the caller zips it
+  (ditto -c -k) and pairs it with render-formula + publish for its cask.
+
+inputs:
+  binary:
+    description: path to the built universal (arm64 + x86_64) Mach-O daemon binary
+    required: true
+  bundle-id:
+    description: "CFBundleIdentifier for the .app and the codesign --identifier (reverse-DNS, e.g. com.yasyf.cc-pool.daemon); this is the TCC client key that survives upgrades"
+    required: true
+  bundle-name:
+    description: "bundle base name — the action assembles <bundle-name>.app and sets CFBundleName (e.g. CCPoolDaemon)"
+    required: true
+  executable-name:
+    description: "CFBundleExecutable / Contents/MacOS/<name> (default: the binary's basename)"
+    required: false
+    default: ""
+  version:
+    description: version string stamped into CFBundleShortVersionString and CFBundleVersion
+    required: true
+  entitlements:
+    description: "optional entitlements plist for codesign (e.g. the app-group claim); must be authorized by the embedded provisioning profile"
+    required: false
+    default: ""
+  provisioning-profile-b64:
+    description: "optional base64-encoded Developer ID provisioning profile — decoded to Contents/embedded.provisionprofile; REQUIRED for a Developer ID app-group claim to earn a no-prompt grant"
+    required: false
+    default: ""
+  info-plist-extras:
+    description: "optional path to a plist whose top-level dict entries are merged (additively — base keys win) into the generated Info.plist"
+    required: false
+    default: ""
+
+outputs:
+  bundle-path:
+    description: absolute path to the assembled, signed, notarized, and stapled .app
+    value: ${{ steps.wrap.outputs.bundle-path }}
+
+runs:
+  using: composite
+  steps:
+    - id: wrap
+      shell: bash
+      env:
+        BINARY: ${{ inputs.binary }}
+        BUNDLE_ID: ${{ inputs.bundle-id }}
+        BUNDLE_NAME: ${{ inputs.bundle-name }}
+        EXECUTABLE_NAME: ${{ inputs.executable-name }}
+        VERSION: ${{ inputs.version }}
+        ENTITLEMENTS: ${{ inputs.entitlements }}
+        PROFILE_B64: ${{ inputs.provisioning-profile-b64 }}
+        INFO_PLIST_EXTRAS: ${{ inputs.info-plist-extras }}
+      run: |
+        set -euo pipefail
+        test -f "$BINARY" || { echo "::error::binary '$BINARY' not found"; exit 1; }
+        test -n "$BUNDLE_ID" || { echo "::error::bundle-id is required"; exit 1; }
+        test -n "$BUNDLE_NAME" || { echo "::error::bundle-name is required"; exit 1; }
+        test -n "$VERSION" || { echo "::error::version is required"; exit 1; }
+        test -n "${MACOS_SIGN_IDENTITY:-}" || { echo "::error::MACOS_SIGN_IDENTITY unset — a daemon .app must be signed to earn a durable TCC grant (run import-developer-id first)"; exit 1; }
+
+        exe="${EXECUTABLE_NAME:-$(basename "$BINARY")}"
+
+        # Assemble <bundle-name>.app in RUNNER_TEMP (never pollute the checkout).
+        app="$RUNNER_TEMP/${BUNDLE_NAME}.app"
+        rm -rf "$app"
+        mkdir -p "$app/Contents/MacOS"
+        # install -m 0755 so the executable bit is set regardless of the input's mode.
+        install -m 0755 "$BINARY" "$app/Contents/MacOS/$exe"
+
+        # LSUIElement=true makes this an invisible agent (no Dock icon, no menu bar) —
+        # correct for a launchd-managed daemon. LSBackgroundOnly is deliberately NOT set:
+        # a pure background-only app is severed from the window server and cannot present
+        # any UI, and this bundle's whole purpose is a consent-earning TCC identity — an
+        # agent that can still participate in the GUI/consent session is the safer choice.
+        plist="$app/Contents/Info.plist"
+        cat > "$plist" <<EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>CFBundleInfoDictionaryVersion</key>
+          <string>6.0</string>
+          <key>CFBundlePackageType</key>
+          <string>APPL</string>
+          <key>CFBundleIdentifier</key>
+          <string>${BUNDLE_ID}</string>
+          <key>CFBundleName</key>
+          <string>${BUNDLE_NAME}</string>
+          <key>CFBundleExecutable</key>
+          <string>${exe}</string>
+          <key>CFBundleShortVersionString</key>
+          <string>${VERSION}</string>
+          <key>CFBundleVersion</key>
+          <string>${VERSION}</string>
+          <key>LSUIElement</key>
+          <true/>
+        </dict>
+        </plist>
+        EOF
+
+        # Merge optional extras additively (base keys win); PlistBuddy Merge does not
+        # overwrite existing entries. Lint the result so a malformed plist fails loud now.
+        if [ -n "$INFO_PLIST_EXTRAS" ]; then
+          test -f "$INFO_PLIST_EXTRAS" || { echo "::error::info-plist-extras '$INFO_PLIST_EXTRAS' not found"; exit 1; }
+          /usr/libexec/PlistBuddy -c "Merge $INFO_PLIST_EXTRAS" "$plist"
+        fi
+        plutil -lint "$plist"
+
+        # Embed the provisioning profile at the sanctioned path/name. For Developer ID
+        # distribution this is what authorizes an entitlement claim (e.g. app groups).
+        if [ -n "$PROFILE_B64" ]; then
+          printf '%s' "$PROFILE_B64" | base64 --decode > "$app/Contents/embedded.provisionprofile"
+        fi
+
+        ents=()
+        if [ -n "$ENTITLEMENTS" ]; then
+          test -f "$ENTITLEMENTS" || { echo "::error::entitlements '$ENTITLEMENTS' not found"; exit 1; }
+          ents=(--entitlements "$ENTITLEMENTS")
+        fi
+
+        # Inside-out: the daemon Mach-O first, then the bundle. Hardened runtime + secure
+        # timestamp. The bundle is --identifier'd as $BUNDLE_ID (matching CFBundleIdentifier)
+        # so the designated requirement and the TCC client_type=0 key are the bundle id.
+        # ${arr[@]+"${arr[@]}"} expands to nothing on an empty array — safe under `set -u`
+        # on the runner's bash 3.2, where a bare "${arr[@]}" on an empty array aborts.
+        codesign --force --options runtime --timestamp ${ents[@]+"${ents[@]}"} -s "$MACOS_SIGN_IDENTITY" "$app/Contents/MacOS/$exe"
+        codesign --force --options runtime --timestamp ${ents[@]+"${ents[@]}"} --identifier "$BUNDLE_ID" -s "$MACOS_SIGN_IDENTITY" "$app"
+        codesign --verify --deep --strict --verbose=2 "$app"
+
+        # When a profile was embedded, prove it decodes and authorizes the app-group claim —
+        # a bundle that requests app groups without a profile authorizing them is exactly the
+        # silent-reprompt failure this action exists to prevent.
+        if [ -n "$PROFILE_B64" ]; then
+          decoded="$RUNNER_TEMP/embedded.provisionprofile.plist"
+          security cms -D -i "$app/Contents/embedded.provisionprofile" > "$decoded" || { echo "::error::security cms -D could not decode the embedded provisioning profile"; exit 1; }
+          /usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.security.application-groups" "$decoded" >/dev/null 2>&1 \
+            || { echo "::error::embedded provisioning profile's Entitlements has no com.apple.security.application-groups — the app-group TCC claim is not authorized"; exit 1; }
+        fi
+
+        # Notarize the bundle. notarytool submit --wait exits 0 even on an Invalid result,
+        # so capture the JSON and FAIL LOUD unless Accepted, dumping the per-issue log.
+        notarize=1
+        test -n "${MACOS_NOTARY_KEY_FILE:-}" || { echo "::warning::no notary key — shipping signed-but-not-notarized (a Developer ID app-group grant needs notarization)"; notarize=0; }
+        if [ "$notarize" = "1" ]; then
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
+          # notarytool's submit/upload is the flakiest step (network, Apple 5xx, timeout); the
+          # cask publishes only after notarization succeeds, so a clean retry is safe. Retry the
+          # submit up to 3x with backoff; a SUCCESSFUL submit returning a non-Accepted status is a
+          # terminal verdict on the bundle (handled below, fail loud), not retried.
+          attempt=1
+          while :; do
+            if xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+              --key "$MACOS_NOTARY_KEY_FILE" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER" \
+              --wait --timeout 20m --output-format json > "$RUNNER_TEMP/notary.json"; then
+              break
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "::error::notarytool submit failed for $app after 3 attempts"; exit 1
+            fi
+            echo "::warning::notarytool submit failed for $app (attempt $attempt/3); retrying in $((attempt * 30))s"
+            sleep "$((attempt * 30))"
+            attempt=$((attempt + 1))
+          done
+          cat "$RUNNER_TEMP/notary.json"
+          sid="$(plutil -extract id raw -o - "$RUNNER_TEMP/notary.json")"
+          if [ "$(plutil -extract status raw -o - "$RUNNER_TEMP/notary.json")" != "Accepted" ]; then
+            xcrun notarytool log "$sid" --key "$MACOS_NOTARY_KEY_FILE" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER" || true
+            echo "::error::notarization not Accepted for $app (submission $sid)"; exit 1
+          fi
+          # Staple so a quarantined install validates offline (an .app can be stapled).
+          xcrun stapler staple "$app"
+          xcrun stapler validate "$app"
+        fi
+
+        echo "bundle-path=$app" >> "$GITHUB_OUTPUT"
+        echo "wrap-daemon-bundle: $app ($BUNDLE_ID, v$VERSION)"
