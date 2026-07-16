@@ -10,8 +10,8 @@
 # pushed here on every tagged release — do not hand-edit; change the
 # template at .github/cask/cc-pool-status.rb.tmpl in cc-pool instead.
 cask "cc-pool-status" do
-  version "0.58.1"
-  sha256 "dffdb2170980cd846d55abdf53c6c546460c745a140ffe8ec56554571c268269" # app
+  version "0.58.2"
+  sha256 "b9a99e935d9aca2242f3a9c9d599afdd6df75b284b7da4071ae0ddee60ed6a8f" # app
 
   url "https://github.com/yasyf/cc-pool/releases/download/v#{version}/cc-pool-status-v#{version}-darwin.zip"
   name "cc-pool Status"
@@ -28,6 +28,12 @@ cask "cc-pool-status" do
     system_command "/usr/bin/xattr",
                    args: ["-dr", "com.apple.quarantine", "#{appdir}/CCPoolStatus.app"],
                    must_succeed: false
+    # Replace only the host process so it starts from the newly installed
+    # binary. File Provider and widget appexes have distinct process names and
+    # remain untouched; live Claude sessions keep their registered domains.
+    system_command "/usr/bin/pkill", args: ["-TERM", "-x", "CCPoolStatus"], must_succeed: false
+    sleep 1
+    system_command "/usr/bin/pkill", args: ["-KILL", "-x", "CCPoolStatus"], must_succeed: false
     system_command "/usr/bin/open", args: ["-g", "#{appdir}/CCPoolStatus.app"], must_succeed: false
     # Register + elect the File Provider appex so ccp can default to the FP
     # backend with no System Settings visit; best-effort — `ccp fp onboard`
