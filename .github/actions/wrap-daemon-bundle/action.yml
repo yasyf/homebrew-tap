@@ -171,13 +171,30 @@ runs:
         # When a profile was embedded, prove it decodes and authorizes EACH claimed app group —
         # a profile that names some OTHER group (or none) is still the silent-reprompt failure
         # this action exists to prevent, so match the specific ids, not just the key's presence.
+        # A Developer ID profile authorizes app groups as the team wildcard "TEAMID.*" (what the
+        # portal mints), and that wildcard authorizes every "TEAMID.<name>" group at runtime, so an
+        # exact-only match would reject the very profiles this action embeds. A claim is authorized
+        # by a literal entry OR a trailing-"*" wildcard whose prefix the claim begins with.
+        group_authorized() {  # $1=claimed group; reads $authorized (newline-separated list)
+          local claim="$1" a oldifs="$IFS"
+          IFS=$'\n'
+          for a in $authorized; do
+            [ -n "$a" ] || continue
+            if [ "$a" = "$claim" ]; then IFS="$oldifs"; return 0; fi
+            case "$a" in
+              *'*') case "$claim" in "${a%'*'}"*) IFS="$oldifs"; return 0 ;; esac ;;
+            esac
+          done
+          IFS="$oldifs"
+          return 1
+        }
         if [ -n "$PROFILE_B64" ]; then
           decoded="$RUNNER_TEMP/embedded.provisionprofile.plist"
           security cms -D -i "$app/Contents/embedded.provisionprofile" > "$decoded" || { echo "::error::security cms -D could not decode the embedded provisioning profile"; exit 1; }
           authorized="$(app_groups "$decoded" ":Entitlements:com.apple.security.application-groups")"
           for c in ${claimed_groups[@]+"${claimed_groups[@]}"}; do
-            printf '%s\n' "$authorized" | grep -qxF -- "$c" \
-              || { echo "::error::embedded provisioning profile does not authorize app group '$c' claimed by the entitlements — the app-group TCC claim is not authorized"; exit 1; }
+            group_authorized "$c" \
+              || { echo "::error::embedded provisioning profile does not authorize app group '$c' claimed by the entitlements (no literal entry and no covering TEAMID.* wildcard) — the app-group TCC claim is not authorized"; exit 1; }
           done
         fi
 
