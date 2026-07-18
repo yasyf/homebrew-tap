@@ -1,0 +1,812 @@
+# Reusable release workflow for a real Xcode-built macOS application, including
+# applications that embed app extensions. Xcode signs every target with its own
+# entitlements; the shared app action only notarizes, staples, and packages.
+
+name: release-app (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        description: built product name without the .app suffix
+        type: string
+        required: true
+      project_dir:
+        description: directory containing the XcodeGen project.yml
+        type: string
+        required: true
+      scheme:
+        description: Xcode scheme to build in Release configuration
+        type: string
+        required: true
+      bundle_id:
+        description: expected CFBundleIdentifier of the host application
+        type: string
+        required: true
+      appexes:
+        description: newline-separated .appex paths relative to the built .app
+        type: string
+        default: ""
+      app_groups:
+        description: newline-separated BUNDLE_ID=APP_GROUP entries; repeat a bundle id for multiple groups
+        type: string
+        default: ""
+      profile_names:
+        description: newline-separated BUNDLE_ID=PROFILE_NAME entries using stable profile names, never UUIDs
+        type: string
+        default: ""
+      marketing_version:
+        description: numeric CFBundleShortVersionString (for example 1.2.3)
+        type: string
+        required: true
+      xcode_version:
+        description: Xcode version selected before XcodeGen and xcodebuild
+        type: string
+        default: "26"
+      notarize:
+        description: notarize and staple the application before packaging
+        type: boolean
+        default: true
+      disable_library_validation:
+        description: '"false" to forbid the entitlement; otherwise the exact audited dylib name that requires it'
+        type: string
+        default: "false"
+      cask_token:
+        description: Homebrew cask token and release-asset basename; empty disables cask publication
+        type: string
+        default: ""
+      cask_template_path:
+        description: cask template path; required exactly when cask_token is set
+        type: string
+        default: ""
+      changed_paths:
+        description: newline-separated shell globs; skip the app release when none changed since the previous v* tag
+        type: string
+        default: ""
+    secrets:
+      MACOS_SIGN_P12:
+        required: false
+      MACOS_SIGN_PASSWORD:
+        required: false
+      MACOS_NOTARY_KEY:
+        required: false
+      MACOS_NOTARY_KEY_ID:
+        required: false
+      MACOS_NOTARY_ISSUER_ID:
+        required: false
+      HOMEBREW_TAP_TOKEN:
+        required: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.gate.outputs.changed }}
+      stable: ${{ steps.gate.outputs.stable }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify the tag is on main
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@v1
+
+      - name: Validate release inputs and apply the change gate
+        id: gate
+        shell: bash
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+          PROJECT_DIR: ${{ inputs.project_dir }}
+          BUNDLE_ID: ${{ inputs.bundle_id }}
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
+          DISABLE_LIBRARY_VALIDATION: ${{ inputs.disable_library_validation }}
+          CASK_TOKEN: ${{ inputs.cask_token }}
+          CASK_TEMPLATE_PATH: ${{ inputs.cask_template_path }}
+          CHANGED_PATHS: ${{ inputs.changed_paths }}
+        run: |
+          set -euo pipefail
+
+          case "$GITHUB_REF" in
+            refs/tags/v*) ;;
+            *) echo "::error::release-app.yml requires a v* tag (got $GITHUB_REF)"; exit 1 ;;
+          esac
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::tag '$GITHUB_REF_NAME' is not strict vMAJOR.MINOR.PATCH semver (optionally with a prerelease)"
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            stable=true
+          else
+            stable=false
+          fi
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+
+          if ! [[ "$MARKETING_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::marketing_version '$MARKETING_VERSION' must be numeric MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          [ -n "$APP_NAME" ] || { echo "::error::app_name is required"; exit 1; }
+          case "$APP_NAME" in
+            .|..|*[!A-Za-z0-9._+\ -]*) echo "::error::app_name '$APP_NAME' contains an unsafe character"; exit 1 ;;
+          esac
+          [ -n "$PROJECT_DIR" ] || { echo "::error::project_dir is required"; exit 1; }
+          case "$PROJECT_DIR" in
+            /*|../*|*/../*|*/..) echo "::error::project_dir must stay inside the checkout"; exit 1 ;;
+          esac
+          if ! [[ "$BUNDLE_ID" =~ ^[A-Za-z0-9]+([.-][A-Za-z0-9]+)+$ ]]; then
+            echo "::error::bundle_id '$BUNDLE_ID' is not a reverse-DNS identifier"
+            exit 1
+          fi
+          if [ "$DISABLE_LIBRARY_VALIDATION" != "false" ]; then
+            [ -n "$DISABLE_LIBRARY_VALIDATION" ] && [ "$DISABLE_LIBRARY_VALIDATION" != "true" ] \
+              || { echo "::error::disable_library_validation must name the audited dylib, not merely 'true'"; exit 1; }
+            case "$DISABLE_LIBRARY_VALIDATION" in
+              *[!A-Za-z0-9._+-]*) echo "::error::audited dylib reason '$DISABLE_LIBRARY_VALIDATION' is not a dylib name"; exit 1 ;;
+            esac
+          fi
+          if [ -n "$CASK_TOKEN" ] || [ -n "$CASK_TEMPLATE_PATH" ]; then
+            [ -n "$CASK_TOKEN" ] && [ -n "$CASK_TEMPLATE_PATH" ] \
+              || { echo "::error::cask_token and cask_template_path must be set together"; exit 1; }
+            if ! [[ "$CASK_TOKEN" =~ ^[a-z0-9]+([+._-][a-z0-9]+)*$ ]]; then
+              echo "::error::cask_token '$CASK_TOKEN' is invalid"
+              exit 1
+            fi
+            test -f "$CASK_TEMPLATE_PATH" \
+              || { echo "::error::cask template '$CASK_TEMPLATE_PATH' not found"; exit 1; }
+          fi
+
+          if ! grep -q '[^[:space:]]' <<< "$CHANGED_PATHS"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="$(git describe --tags --match 'v[0-9]*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+          if [ -z "$base" ]; then
+            echo "No earlier v* tag is reachable; the app is considered changed."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed=false
+          while IFS= read -r path; do
+            while IFS= read -r pattern || [ -n "$pattern" ]; do
+              [ -n "$pattern" ] || continue
+              # shellcheck disable=SC2053 # CHANGED_PATHS entries are intentional globs.
+              if [[ "$path" == $pattern ]]; then
+                echo "App release change: $path matches $pattern"
+                changed=true
+                break 2
+              fi
+            done <<< "$CHANGED_PATHS"
+          done < <(git diff --name-only "$base" "$GITHUB_SHA")
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          if [ "$changed" = "false" ]; then
+            echo "No changed path matched since $base; skipping the app release."
+          fi
+
+      - name: Guard cask registry name and version
+        if: ${{ steps.gate.outputs.changed == 'true' && steps.gate.outputs.stable == 'true' && inputs.cask_token != '' }}
+        shell: bash
+        env:
+          CASK_TOKEN: ${{ inputs.cask_token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2153 # VERSION is supplied through the step env.
+          version="${VERSION#v}"
+          tmp="$(mktemp -d)"
+
+          fetch() {
+            url="$1"
+            output="$2"
+            if ! code="$(curl --connect-timeout 15 --max-time 45 -sS -o "$output" -w '%{http_code}' "$url")"; then
+              echo "::error::registry guard could not reach $url; refusing to release blind"
+              exit 1
+            fi
+            case "$code" in
+              200|404) printf '%s' "$code" ;;
+              *) echo "::error::registry guard got HTTP $code from $url; refusing to release blind"; exit 1 ;;
+            esac
+          }
+
+          formula_url="https://raw.githubusercontent.com/yasyf/homebrew-tap/main/Formula/${CASK_TOKEN}.rb"
+          formula_code="$(fetch "$formula_url" "$tmp/formula.rb")"
+          if [ "$formula_code" = "200" ]; then
+            echo "::error::Formula/${CASK_TOKEN}.rb already exists; a same-named cask would make brew install ambiguous"
+            exit 1
+          fi
+
+          cask_url="https://raw.githubusercontent.com/yasyf/homebrew-tap/main/Casks/${CASK_TOKEN}.rb"
+          cask_code="$(fetch "$cask_url" "$tmp/cask.rb")"
+          if [ "$cask_code" = "404" ]; then
+            exit 0
+          fi
+          grep -Eq "^[[:space:]]*cask[[:space:]]+\"${CASK_TOKEN}\"[[:space:]]+do" "$tmp/cask.rb" \
+            || { echo "::error::the registered Casks/${CASK_TOKEN}.rb declares a different cask name"; exit 1; }
+          current="$(sed -n 's/^[[:space:]]*version[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' "$tmp/cask.rb" | sed -n '1p')"
+          [ -n "$current" ] \
+            || { echo "::error::could not parse the registered version for $CASK_TOKEN"; exit 1; }
+          first="$(printf '%s\n%s\n' "$current" "$version" | sort -V | sed -n '1p')"
+          if [ "$first" = "$version" ] && [ "$current" != "$version" ]; then
+            echo "::error::release version $version is older than registered cask version $current"
+            exit 1
+          fi
+
+  release:
+    needs: preflight
+    if: ${{ needs.preflight.outputs.changed == 'true' }}
+    runs-on: macos-15
+    permissions:
+      contents: write
+    outputs:
+      sha256: ${{ steps.package.outputs.sha256 }}
+    defaults:
+      run:
+        shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Require every release secret before signing
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          PROFILE_NAMES: ${{ inputs.profile_names }}
+          APP_GROUPS: ${{ inputs.app_groups }}
+          NOTARIZE: ${{ inputs.notarize }}
+          CASK_TOKEN: ${{ inputs.cask_token }}
+          STABLE: ${{ needs.preflight.outputs.stable }}
+        run: |
+          set -euo pipefail
+          require_secret() {
+            value="$1"
+            name="$2"
+            [ -n "$value" ] || { echo "::error::required secret $name is empty"; exit 1; }
+          }
+          require_secret "$MACOS_SIGN_P12" MACOS_SIGN_P12
+          require_secret "$MACOS_SIGN_PASSWORD" MACOS_SIGN_PASSWORD
+          if grep -q '[^[:space:]]' <<< "$APP_GROUPS" \
+            && ! grep -q '[^[:space:]]' <<< "$PROFILE_NAMES"; then
+            echo "::error::app_groups requires profile_names so every claim can be authorized before signing"
+            exit 1
+          fi
+
+          needs_api=false
+          if [ "$NOTARIZE" = "true" ] || grep -q '[^[:space:]]' <<< "$PROFILE_NAMES"; then
+            needs_api=true
+          fi
+          if [ "$needs_api" = "true" ]; then
+            require_secret "$MACOS_NOTARY_KEY" MACOS_NOTARY_KEY
+            require_secret "$MACOS_NOTARY_KEY_ID" MACOS_NOTARY_KEY_ID
+            require_secret "$MACOS_NOTARY_ISSUER_ID" MACOS_NOTARY_ISSUER_ID
+          fi
+          if [ "$STABLE" = "true" ] && [ -n "$CASK_TOKEN" ]; then
+            require_secret "$HOMEBREW_TAP_TOKEN" HOMEBREW_TAP_TOKEN
+          fi
+
+      - name: Import Developer ID certificate
+        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@v1
+        with:
+          p12: ${{ secrets.MACOS_SIGN_P12 }}
+          p12-password: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          notary-key: ${{ (inputs.notarize || inputs.profile_names != '') && secrets.MACOS_NOTARY_KEY || '' }}
+          notary-key-id: ${{ (inputs.notarize || inputs.profile_names != '') && secrets.MACOS_NOTARY_KEY_ID || '' }}
+          notary-issuer-id: ${{ (inputs.notarize || inputs.profile_names != '') && secrets.MACOS_NOTARY_ISSUER_ID || '' }}
+
+      - name: Select Xcode ${{ inputs.xcode_version }}
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ inputs.xcode_version }}
+
+      - name: Generate the Xcode project and release version configuration
+        id: project
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir }}
+          APP_NAME: ${{ inputs.app_name }}
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
+          ASSET_NAME: ${{ inputs.cask_token || inputs.app_name }}
+        run: |
+          set -euo pipefail
+          command -v xcodegen >/dev/null || brew install xcodegen
+          # shellcheck disable=SC2153 # PROJECT_DIR is supplied through the step env.
+          project_dir="$(cd "$PROJECT_DIR" && pwd)"
+          cd "$project_dir"
+          xcodegen generate
+
+          shopt -s nullglob
+          projects=("$project_dir"/*.xcodeproj)
+          if [ "${#projects[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one generated .xcodeproj in $project_dir, found ${#projects[@]}"
+            exit 1
+          fi
+          current_project_version="$(git -C "$GITHUB_WORKSPACE" rev-list --count HEAD)"
+          version_xcconfig="$RUNNER_TEMP/release-version.xcconfig"
+          {
+            printf 'MARKETING_VERSION = %s\n' "$MARKETING_VERSION"
+            printf 'CURRENT_PROJECT_VERSION = %s\n' "$current_project_version"
+          } > "$version_xcconfig"
+          {
+            echo "project=${projects[0]}"
+            echo "version-xcconfig=$version_xcconfig"
+            echo "current-project-version=$current_project_version"
+            echo "app=$project_dir/build/Build/Products/Release/${APP_NAME}.app"
+            echo "asset-name=$ASSET_NAME"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Resolve and assert provisioning profiles
+        if: ${{ inputs.profile_names != '' }}
+        env:
+          PROJECT: ${{ steps.project.outputs.project }}
+          VERSION_XCCONFIG: ${{ steps.project.outputs.version-xcconfig }}
+          SCHEME: ${{ inputs.scheme }}
+          PROFILE_NAMES: ${{ inputs.profile_names }}
+          APP_GROUPS: ${{ inputs.app_groups }}
+        run: |
+          set -euo pipefail
+          profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$profiles_dir"
+          build_settings="$RUNNER_TEMP/release-build-settings.txt"
+
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
+            -configuration Release -xcconfig "$VERSION_XCCONFIG" \
+            -showBuildSettings \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$MACOS_NOTARY_KEY_FILE" \
+            -authenticationKeyID "$MACOS_NOTARY_KEY_ID" \
+            -authenticationKeyIssuerID "$MACOS_NOTARY_ISSUER" \
+            > "$build_settings"
+
+          profile_name_for() {
+            wanted="$1"
+            while IFS= read -r line || [ -n "$line" ]; do
+              [ -n "$line" ] || continue
+              key="${line%%=*}"
+              value="${line#*=}"
+              if [ "$key" = "$wanted" ]; then printf '%s' "$value"; return 0; fi
+            done <<< "$PROFILE_NAMES"
+            return 1
+          }
+          groups_for() {
+            wanted="$1"
+            while IFS= read -r line || [ -n "$line" ]; do
+              [ -n "$line" ] || continue
+              key="${line%%=*}"
+              value="${line#*=}"
+              if [ "$key" = "$wanted" ]; then printf '%s\n' "$value"; fi
+            done <<< "$APP_GROUPS"
+          }
+          plist_array() {
+            plist="$1"
+            keypath="$2"
+            i=0
+            while value="$(/usr/libexec/PlistBuddy -c "Print $keypath:$i" "$plist" 2>/dev/null)"; do
+              printf '%s\n' "$value"
+              i=$((i + 1))
+            done
+          }
+          group_authorized() {
+            claim="$1"
+            authorized_file="$2"
+            while IFS= read -r allowed; do
+              [ "$allowed" = "$claim" ] && return 0
+              [ "$allowed" = "${TEAM_ID}.*" ] && return 0
+            done < "$authorized_file"
+            return 1
+          }
+
+          seen="$RUNNER_TEMP/profile-mapping-bundles"
+          : > "$seen"
+          while IFS= read -r line || [ -n "$line" ]; do
+            [ -n "$line" ] || continue
+            case "$line" in
+              *=*) ;;
+              *) echo "::error::profile_names entry '$line' must be BUNDLE_ID=PROFILE_NAME"; exit 1 ;;
+            esac
+            bundle="${line%%=*}"
+            expected_name="${line#*=}"
+            [ -n "$bundle" ] && [ -n "$expected_name" ] \
+              || { echo "::error::profile_names contains an empty bundle id or profile name"; exit 1; }
+            if grep -Fxq "$bundle" "$seen"; then
+              echo "::error::profile_names contains duplicate bundle id '$bundle'"
+              exit 1
+            fi
+            echo "$bundle" >> "$seen"
+            grep -Fq "PROVISIONING_PROFILE_SPECIFIER = $expected_name" "$build_settings" \
+              || { echo "::error::generated project does not request profile name '$expected_name'"; exit 1; }
+
+            found=""
+            decoded="$RUNNER_TEMP/profile-decoded.plist"
+            while IFS= read -r profile; do
+              candidate="$RUNNER_TEMP/profile-candidate.plist"
+              if ! security cms -D -i "$profile" > "$candidate" 2>/dev/null; then
+                continue
+              fi
+              candidate_name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$candidate" 2>/dev/null || true)"
+              if [ "$candidate_name" = "$expected_name" ]; then
+                [ -z "$found" ] \
+                  || { echo "::error::multiple installed profiles are named '$expected_name'"; exit 1; }
+                found="$profile"
+                cp "$candidate" "$decoded"
+              fi
+            done < <(find "$profiles_dir" -type f -name '*.provisionprofile' -print | sort)
+            [ -n "$found" ] \
+              || { echo "::error::xcodebuild did not install the expected profile '$expected_name'"; exit 1; }
+            [ "$(/usr/libexec/PlistBuddy -c 'Print :Name' "$decoded")" = "$expected_name" ]
+            [ "$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$decoded")" = "$TEAM_ID" ] \
+              || { echo "::error::profile '$expected_name' belongs to a different Team ID"; exit 1; }
+
+            authorized="$RUNNER_TEMP/profile-authorized-groups"
+            plist_array "$decoded" ':Entitlements:com.apple.security.application-groups' > "$authorized"
+            while IFS= read -r group; do
+              [ -n "$group" ] || continue
+              case "$group" in
+                "$TEAM_ID".*) ;;
+                *) echo "::error::app group '$group' does not belong to signing team $TEAM_ID"; exit 1 ;;
+              esac
+              group_authorized "$group" "$authorized" \
+                || { echo "::error::profile '$expected_name' does not authorize '$group' literally or as ${TEAM_ID}.*"; exit 1; }
+            done < <(groups_for "$bundle")
+          done <<< "$PROFILE_NAMES"
+
+          while IFS= read -r line || [ -n "$line" ]; do
+            [ -n "$line" ] || continue
+            case "$line" in
+              *=*) ;;
+              *) echo "::error::app_groups entry '$line' must be BUNDLE_ID=APP_GROUP"; exit 1 ;;
+            esac
+            bundle="${line%%=*}"
+            group="${line#*=}"
+            [ -n "$bundle" ] && [ -n "$group" ] \
+              || { echo "::error::app_groups contains an empty bundle id or group"; exit 1; }
+            profile_name_for "$bundle" >/dev/null \
+              || { echo "::error::app group '$group' has no profile_names entry for '$bundle'"; exit 1; }
+          done <<< "$APP_GROUPS"
+
+      - name: Build the signed Release application
+        env:
+          PROJECT: ${{ steps.project.outputs.project }}
+          VERSION_XCCONFIG: ${{ steps.project.outputs.version-xcconfig }}
+          SCHEME: ${{ inputs.scheme }}
+          PROJECT_DIR: ${{ inputs.project_dir }}
+          PROFILE_NAMES: ${{ inputs.profile_names }}
+          APP: ${{ steps.project.outputs.app }}
+          APP_BUNDLE_ID: ${{ inputs.bundle_id }}
+          APPEXES: ${{ inputs.appexes }}
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
+          CURRENT_PROJECT_VERSION: ${{ steps.project.outputs.current-project-version }}
+        run: |
+          set -euo pipefail
+          auth_args=()
+          if grep -q '[^[:space:]]' <<< "$PROFILE_NAMES"; then
+            auth_args=(
+              -allowProvisioningUpdates
+              -authenticationKeyPath "$MACOS_NOTARY_KEY_FILE"
+              -authenticationKeyID "$MACOS_NOTARY_KEY_ID"
+              -authenticationKeyIssuerID "$MACOS_NOTARY_ISSUER"
+            )
+          fi
+          derived_data="$(cd "$PROJECT_DIR" && pwd)/build"
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
+            -configuration Release -derivedDataPath "$derived_data" \
+            -xcconfig "$VERSION_XCCONFIG" build \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            ENABLE_HARDENED_RUNTIME=YES \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+            OTHER_CODE_SIGN_FLAGS="--timestamp" \
+            ${auth_args[@]+"${auth_args[@]}"}
+
+          test -d "$APP" || { echo "::error::built app '$APP' not found"; exit 1; }
+          targets="$RUNNER_TEMP/release-app-targets"
+          printf '%s\n' "$APP" > "$targets"
+          while IFS= read -r rel || [ -n "$rel" ]; do
+            [ -n "$rel" ] || continue
+            case "$rel" in
+              /*|../*|*/../*|*/..|*.appex) ;;
+              *) echo "::error::appexes entry '$rel' must be a relative .appex path"; exit 1 ;;
+            esac
+            case "$rel" in
+              /*|../*|*/../*|*/..) echo "::error::appexes path '$rel' escapes the app"; exit 1 ;;
+            esac
+            target="$APP/$rel"
+            test -d "$target" || { echo "::error::expected app extension '$target' not found"; exit 1; }
+            if grep -Fxq "$target" "$targets"; then
+              echo "::error::duplicate appexes entry '$rel'"
+              exit 1
+            fi
+            echo "$target" >> "$targets"
+          done <<< "$APPEXES"
+
+          while IFS= read -r actual; do
+            grep -Fxq "$actual" "$targets" \
+              || { echo "::error::built app contains unlisted extension '$actual'"; exit 1; }
+          done < <(find "$APP/Contents" -type d -name '*.appex' -prune -print | sort)
+
+          first=true
+          while IFS= read -r target; do
+            plist="$target/Contents/Info.plist"
+            test -f "$plist" || { echo "::error::Info.plist missing from '$target'"; exit 1; }
+            built_bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$plist")"
+            if [ "$first" = "true" ]; then
+              [ "$built_bundle_id" = "$APP_BUNDLE_ID" ] \
+                || { echo "::error::host bundle id '$built_bundle_id' != '$APP_BUNDLE_ID'"; exit 1; }
+              first=false
+            fi
+            short="$(plutil -extract CFBundleShortVersionString raw -o - "$plist")"
+            build="$(plutil -extract CFBundleVersion raw -o - "$plist")"
+            [ "$short" = "$MARKETING_VERSION" ] \
+              || { echo "::error::$target has CFBundleShortVersionString '$short', expected '$MARKETING_VERSION'"; exit 1; }
+            [ "$build" = "$CURRENT_PROJECT_VERSION" ] \
+              || { echo "::error::$target has CFBundleVersion '$build', expected '$CURRENT_PROJECT_VERSION'"; exit 1; }
+          done < "$targets"
+
+      - name: Disable notarization after profile resolution
+        if: ${{ !inputs.notarize }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'MACOS_NOTARY_KEY_FILE='
+            echo 'MACOS_NOTARY_KEY_ID='
+            echo 'MACOS_NOTARY_ISSUER='
+          } >> "$GITHUB_ENV"
+
+      # sign-notarize-app owns notarytool's 20-minute upload timeout, three
+      # transport retries, terminal non-Accepted verdict, JSON status check, log
+      # dump, staple, and ditto packaging. After repeated upload failures, the
+      # documented operational fallback is Apple's Notary REST API, never a retry
+      # of a completed non-Accepted submission.
+      - name: Notarize, staple, and package the Xcode-signed application
+        id: package
+        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-app@v1
+        with:
+          app: ${{ steps.project.outputs.app }}
+          name: ${{ steps.project.outputs.asset-name }}
+          bundle-id: ${{ inputs.bundle_id }}
+          sign: "false"
+          attach-to-release: "false"
+
+      - name: Assert final per-target signatures and entitlements
+        env:
+          APP: ${{ steps.project.outputs.app }}
+          APPEXES: ${{ inputs.appexes }}
+          APP_GROUPS: ${{ inputs.app_groups }}
+          PROFILE_NAMES: ${{ inputs.profile_names }}
+          DISABLE_LIBRARY_VALIDATION: ${{ inputs.disable_library_validation }}
+          NOTARIZE: ${{ inputs.notarize }}
+        run: |
+          set -euo pipefail
+          targets="$RUNNER_TEMP/release-app-final-targets"
+          printf '%s\n' "$APP" > "$targets"
+          while IFS= read -r rel || [ -n "$rel" ]; do
+            [ -n "$rel" ] || continue
+            printf '%s\n' "$APP/$rel" >> "$targets"
+          done <<< "$APPEXES"
+
+          profile_name_for() {
+            wanted="$1"
+            while IFS= read -r line || [ -n "$line" ]; do
+              [ -n "$line" ] || continue
+              key="${line%%=*}"
+              value="${line#*=}"
+              if [ "$key" = "$wanted" ]; then printf '%s' "$value"; return 0; fi
+            done <<< "$PROFILE_NAMES"
+            return 1
+          }
+          groups_for() {
+            wanted="$1"
+            while IFS= read -r line || [ -n "$line" ]; do
+              [ -n "$line" ] || continue
+              key="${line%%=*}"
+              value="${line#*=}"
+              if [ "$key" = "$wanted" ]; then printf '%s\n' "$value"; fi
+            done <<< "$APP_GROUPS"
+          }
+          plist_array() {
+            plist="$1"
+            keypath="$2"
+            i=0
+            while value="$(/usr/libexec/PlistBuddy -c "Print $keypath:$i" "$plist" 2>/dev/null)"; do
+              printf '%s\n' "$value"
+              i=$((i + 1))
+            done
+          }
+          group_authorized() {
+            claim="$1"
+            authorized_file="$2"
+            while IFS= read -r allowed; do
+              [ "$allowed" = "$claim" ] && return 0
+              [ "$allowed" = "${TEAM_ID}.*" ] && return 0
+            done < "$authorized_file"
+            return 1
+          }
+          entitlement_present() {
+            plist="$1"
+            key="$2"
+            /usr/libexec/PlistBuddy -c "Print :$key" "$plist" >/dev/null 2>&1
+          }
+
+          seen_bundles="$RUNNER_TEMP/release-app-seen-bundles"
+          dlv_seen="$RUNNER_TEMP/release-app-dlv-seen"
+          : > "$seen_bundles"
+          rm -f "$dlv_seen"
+          index=0
+          while IFS= read -r target; do
+            codesign --verify --strict --verbose=2 "$target"
+            dr="$(codesign -d -r- "$target" 2>&1 | sed -n 's/^designated => //p')"
+            [ -n "$dr" ] || { echo "::error::$target has no designated requirement"; exit 1; }
+            codesign --verify --strict -R="$dr" "$target"
+
+            plist="$target/Contents/Info.plist"
+            bundle="$(plutil -extract CFBundleIdentifier raw -o - "$plist")"
+            if grep -Fxq "$bundle" "$seen_bundles"; then
+              echo "::error::duplicate built bundle id '$bundle'"
+              exit 1
+            fi
+            echo "$bundle" >> "$seen_bundles"
+            signed_team="$(codesign -dvv "$target" 2>&1 | sed -n 's/^TeamIdentifier=//p' | sed -n '1p')"
+            [ "$signed_team" = "$TEAM_ID" ] \
+              || { echo "::error::$bundle is signed by TeamIdentifier '$signed_team', expected '$TEAM_ID'"; exit 1; }
+
+            entitlements="$RUNNER_TEMP/release-entitlements-$index.plist"
+            if ! codesign -d --entitlements :- "$target" > "$entitlements" 2>/dev/null; then
+              : > "$entitlements"
+            fi
+            if [ -s "$entitlements" ]; then
+              plutil -lint "$entitlements" >/dev/null
+              if entitlement_present "$entitlements" 'com.apple.security.get-task-allow'; then
+                echo "::error::$bundle carries forbidden get-task-allow"
+                exit 1
+              fi
+              for key in \
+                com.apple.security.cs.allow-dyld-environment-variables \
+                com.apple.security.cs.allow-jit \
+                com.apple.security.cs.allow-unsigned-executable-memory \
+                com.apple.security.cs.disable-executable-page-protection \
+                com.apple.security.cs.disable-executable-memory-protection \
+                com.apple.security.cs.debugger; do
+                if entitlement_present "$entitlements" "$key"; then
+                  echo "::error::$bundle carries unapproved bypass entitlement $key"
+                  exit 1
+                fi
+              done
+              if entitlement_present "$entitlements" 'com.apple.security.cs.disable-library-validation'; then
+                [ "$DISABLE_LIBRARY_VALIDATION" != "false" ] \
+                  || { echo "::error::$bundle disables library validation without an audited dylib reason"; exit 1; }
+                touch "$dlv_seen"
+                echo "$bundle: library validation disabled for audited dylib $DISABLE_LIBRARY_VALIDATION"
+              fi
+              plist_array "$entitlements" ':com.apple.security.application-groups' \
+                | sort -u > "$RUNNER_TEMP/release-actual-groups"
+            else
+              : > "$RUNNER_TEMP/release-actual-groups"
+            fi
+            groups_for "$bundle" | sort -u > "$RUNNER_TEMP/release-expected-groups"
+            if ! diff -u "$RUNNER_TEMP/release-expected-groups" "$RUNNER_TEMP/release-actual-groups"; then
+              echo "::error::$bundle application-groups differ from the approved app_groups input"
+              exit 1
+            fi
+
+            expected_profile="$(profile_name_for "$bundle" || true)"
+            embedded="$target/Contents/embedded.provisionprofile"
+            if [ -n "$expected_profile" ]; then
+              test -f "$embedded" \
+                || { echo "::error::$bundle is missing expected embedded profile '$expected_profile'"; exit 1; }
+              decoded="$RUNNER_TEMP/release-embedded-profile-$index.plist"
+              security cms -D -i "$embedded" > "$decoded"
+              actual_name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$decoded")"
+              [ "$actual_name" = "$expected_profile" ] \
+                || { echo "::error::$bundle embedded profile '$actual_name', expected stable name '$expected_profile'"; exit 1; }
+              authorized="$RUNNER_TEMP/release-authorized-groups-$index"
+              plist_array "$decoded" ':Entitlements:com.apple.security.application-groups' > "$authorized"
+              while IFS= read -r group; do
+                [ -n "$group" ] || continue
+                group_authorized "$group" "$authorized" \
+                  || { echo "::error::$bundle profile does not authorize '$group' literally or as ${TEAM_ID}.*"; exit 1; }
+              done < "$RUNNER_TEMP/release-actual-groups"
+            elif [ -f "$embedded" ]; then
+              echo "::error::$bundle embeds a provisioning profile but profile_names does not approve one"
+              exit 1
+            fi
+            index=$((index + 1))
+          done < "$targets"
+
+          if [ "$DISABLE_LIBRARY_VALIDATION" != "false" ] && [ ! -f "$dlv_seen" ]; then
+            echo "::error::disable_library_validation names '$DISABLE_LIBRARY_VALIDATION' but no target carries the entitlement"
+            exit 1
+          fi
+          while IFS= read -r line || [ -n "$line" ]; do
+            [ -n "$line" ] || continue
+            bundle="${line%%=*}"
+            grep -Fxq "$bundle" "$seen_bundles" \
+              || { echo "::error::app_groups names unbuilt bundle '$bundle'"; exit 1; }
+          done <<< "$APP_GROUPS"
+          while IFS= read -r line || [ -n "$line" ]; do
+            [ -n "$line" ] || continue
+            bundle="${line%%=*}"
+            grep -Fxq "$bundle" "$seen_bundles" \
+              || { echo "::error::profile_names names unbuilt bundle '$bundle'"; exit 1; }
+          done <<< "$PROFILE_NAMES"
+          if [ "$NOTARIZE" = "true" ]; then
+            xcrun stapler validate "$APP"
+          fi
+
+      - name: Attach the verified application artifact to the GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.zip }}.sha256
+          generate_release_notes: false
+          prerelease: ${{ needs.preflight.outputs.stable != 'true' }}
+
+      - name: Upload the verified application artifact for the cask job
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-app-${{ steps.project.outputs.asset-name }}
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.zip }}.sha256
+          if-no-files-found: error
+
+  cask:
+    needs: [preflight, release]
+    if: ${{ needs.preflight.outputs.changed == 'true' && needs.preflight.outputs.stable == 'true' && inputs.cask_token != '' && inputs.cask_template_path != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-app-${{ inputs.cask_token }}
+          path: dist
+
+      - name: Verify the downloaded application artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          shasum -a 256 -c dist/*.sha256
+
+      - name: Require a full-application cask template
+        shell: bash
+        env:
+          CASK_TEMPLATE_PATH: ${{ inputs.cask_template_path }}
+        run: |
+          set -euo pipefail
+          grep -Eq '^[[:space:]]*app[[:space:]]+' "$CASK_TEMPLATE_PATH" \
+            || { echo "::error::cask template must install the full .app with an app stanza"; exit 1; }
+          if grep -Eq '^[[:space:]]*binary[[:space:]]+' "$CASK_TEMPLATE_PATH"; then
+            echo "::error::cask template must not install this application as a bare binary"
+            exit 1
+          fi
+
+      - name: Render the cask
+        uses: yasyf/homebrew-tap/.github/actions/render-formula@v1
+        with:
+          template: ${{ inputs.cask_template_path }}
+          output: Casks/${{ inputs.cask_token }}.rb
+          substitutions: |
+            __SHA_APP__=${{ needs.release.outputs.sha256 }}
+            __APP_NAME__=${{ inputs.app_name }}
+            __CASK_TOKEN__=${{ inputs.cask_token }}
+            __REPO__=${{ github.repository }}
+
+      - name: Publish the cask to the tap
+        uses: yasyf/homebrew-tap/.github/actions/publish@v1
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          dir: tap-staging
+          message: "${{ inputs.cask_token }} ${{ github.ref_name }}"
