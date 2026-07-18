@@ -355,139 +355,6 @@ jobs:
             echo "asset-name=$ASSET_NAME"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Resolve and assert provisioning profiles
-        if: ${{ inputs.profile_names != '' }}
-        env:
-          PROJECT: ${{ steps.project.outputs.project }}
-          VERSION_XCCONFIG: ${{ steps.project.outputs.version-xcconfig }}
-          SCHEME: ${{ inputs.scheme }}
-          PROFILE_NAMES: ${{ inputs.profile_names }}
-          APP_GROUPS: ${{ inputs.app_groups }}
-        run: |
-          set -euo pipefail
-          profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
-          mkdir -p "$profiles_dir"
-          build_settings="$RUNNER_TEMP/release-build-settings.txt"
-
-          xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
-            -configuration Release -xcconfig "$VERSION_XCCONFIG" \
-            -showBuildSettings \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY" \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$MACOS_NOTARY_KEY_FILE" \
-            -authenticationKeyID "$MACOS_NOTARY_KEY_ID" \
-            -authenticationKeyIssuerID "$MACOS_NOTARY_ISSUER" \
-            > "$build_settings"
-
-          profile_name_for() {
-            wanted="$1"
-            while IFS= read -r line || [ -n "$line" ]; do
-              [ -n "$line" ] || continue
-              key="${line%%=*}"
-              value="${line#*=}"
-              if [ "$key" = "$wanted" ]; then printf '%s' "$value"; return 0; fi
-            done <<< "$PROFILE_NAMES"
-            return 1
-          }
-          groups_for() {
-            wanted="$1"
-            while IFS= read -r line || [ -n "$line" ]; do
-              [ -n "$line" ] || continue
-              key="${line%%=*}"
-              value="${line#*=}"
-              if [ "$key" = "$wanted" ]; then printf '%s\n' "$value"; fi
-            done <<< "$APP_GROUPS"
-          }
-          plist_array() {
-            plist="$1"
-            keypath="$2"
-            i=0
-            while value="$(/usr/libexec/PlistBuddy -c "Print $keypath:$i" "$plist" 2>/dev/null)"; do
-              printf '%s\n' "$value"
-              i=$((i + 1))
-            done
-          }
-          group_authorized() {
-            claim="$1"
-            authorized_file="$2"
-            while IFS= read -r allowed; do
-              [ "$allowed" = "$claim" ] && return 0
-              [ "$allowed" = "${TEAM_ID}.*" ] && return 0
-            done < "$authorized_file"
-            return 1
-          }
-
-          seen="$RUNNER_TEMP/profile-mapping-bundles"
-          : > "$seen"
-          while IFS= read -r line || [ -n "$line" ]; do
-            [ -n "$line" ] || continue
-            case "$line" in
-              *=*) ;;
-              *) echo "::error::profile_names entry '$line' must be BUNDLE_ID=PROFILE_NAME"; exit 1 ;;
-            esac
-            bundle="${line%%=*}"
-            expected_name="${line#*=}"
-            [ -n "$bundle" ] && [ -n "$expected_name" ] \
-              || { echo "::error::profile_names contains an empty bundle id or profile name"; exit 1; }
-            if grep -Fxq "$bundle" "$seen"; then
-              echo "::error::profile_names contains duplicate bundle id '$bundle'"
-              exit 1
-            fi
-            echo "$bundle" >> "$seen"
-            grep -Fq "PROVISIONING_PROFILE_SPECIFIER = $expected_name" "$build_settings" \
-              || { echo "::error::generated project does not request profile name '$expected_name'"; exit 1; }
-
-            found=""
-            decoded="$RUNNER_TEMP/profile-decoded.plist"
-            while IFS= read -r profile; do
-              candidate="$RUNNER_TEMP/profile-candidate.plist"
-              if ! security cms -D -i "$profile" > "$candidate" 2>/dev/null; then
-                continue
-              fi
-              candidate_name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$candidate" 2>/dev/null || true)"
-              if [ "$candidate_name" = "$expected_name" ]; then
-                [ -z "$found" ] \
-                  || { echo "::error::multiple installed profiles are named '$expected_name'"; exit 1; }
-                found="$profile"
-                cp "$candidate" "$decoded"
-              fi
-            done < <(find "$profiles_dir" -type f -name '*.provisionprofile' -print | sort)
-            [ -n "$found" ] \
-              || { echo "::error::xcodebuild did not install the expected profile '$expected_name'"; exit 1; }
-            [ "$(/usr/libexec/PlistBuddy -c 'Print :Name' "$decoded")" = "$expected_name" ]
-            [ "$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$decoded")" = "$TEAM_ID" ] \
-              || { echo "::error::profile '$expected_name' belongs to a different Team ID"; exit 1; }
-
-            authorized="$RUNNER_TEMP/profile-authorized-groups"
-            plist_array "$decoded" ':Entitlements:com.apple.security.application-groups' > "$authorized"
-            while IFS= read -r group; do
-              [ -n "$group" ] || continue
-              case "$group" in
-                "$TEAM_ID".*) ;;
-                *) echo "::error::app group '$group' does not belong to signing team $TEAM_ID"; exit 1 ;;
-              esac
-              group_authorized "$group" "$authorized" \
-                || { echo "::error::profile '$expected_name' does not authorize '$group' literally or as ${TEAM_ID}.*"; exit 1; }
-            done < <(groups_for "$bundle")
-          done <<< "$PROFILE_NAMES"
-
-          while IFS= read -r line || [ -n "$line" ]; do
-            [ -n "$line" ] || continue
-            case "$line" in
-              *=*) ;;
-              *) echo "::error::app_groups entry '$line' must be BUNDLE_ID=APP_GROUP"; exit 1 ;;
-            esac
-            bundle="${line%%=*}"
-            group="${line#*=}"
-            [ -n "$bundle" ] && [ -n "$group" ] \
-              || { echo "::error::app_groups contains an empty bundle id or group"; exit 1; }
-            profile_name_for "$bundle" >/dev/null \
-              || { echo "::error::app group '$group' has no profile_names entry for '$bundle'"; exit 1; }
-          done <<< "$APP_GROUPS"
-
       - name: Build the signed Release application
         env:
           PROJECT: ${{ steps.project.outputs.project }}
@@ -566,6 +433,143 @@ jobs:
             [ "$build" = "$CURRENT_PROJECT_VERSION" ] \
               || { echo "::error::$target has CFBundleVersion '$build', expected '$CURRENT_PROJECT_VERSION'"; exit 1; }
           done < "$targets"
+
+      - name: Validate embedded provisioning profiles
+        if: ${{ inputs.profile_names != '' }}
+        env:
+          APP: ${{ steps.project.outputs.app }}
+          APPEXES: ${{ inputs.appexes }}
+          PROFILE_NAMES: ${{ inputs.profile_names }}
+          APP_GROUPS: ${{ inputs.app_groups }}
+        run: |
+          set -euo pipefail
+          # -showBuildSettings only evaluates settings, so the real build must perform signing resolution before embedded profiles can be validated.
+
+          profile_name_for() {
+            wanted="$1"
+            while IFS= read -r line || [ -n "$line" ]; do
+              [ -n "$line" ] || continue
+              key="${line%%=*}"
+              value="${line#*=}"
+              if [ "$key" = "$wanted" ]; then printf '%s' "$value"; return 0; fi
+            done <<< "$PROFILE_NAMES"
+            return 1
+          }
+          groups_for() {
+            wanted="$1"
+            while IFS= read -r line || [ -n "$line" ]; do
+              [ -n "$line" ] || continue
+              key="${line%%=*}"
+              value="${line#*=}"
+              if [ "$key" = "$wanted" ]; then printf '%s\n' "$value"; fi
+            done <<< "$APP_GROUPS"
+          }
+          plist_array() {
+            plist="$1"
+            keypath="$2"
+            i=0
+            while value="$(/usr/libexec/PlistBuddy -c "Print $keypath:$i" "$plist" 2>/dev/null)"; do
+              printf '%s\n' "$value"
+              i=$((i + 1))
+            done
+          }
+          group_authorized() {
+            claim="$1"
+            authorized_file="$2"
+            while IFS= read -r allowed; do
+              [ "$allowed" = "$claim" ] && return 0
+              [ "$allowed" = "${TEAM_ID}.*" ] && return 0
+            done < "$authorized_file"
+            return 1
+          }
+
+          mapped_bundles="$RUNNER_TEMP/release-profile-mapping-bundles"
+          : > "$mapped_bundles"
+          while IFS= read -r line || [ -n "$line" ]; do
+            [ -n "$line" ] || continue
+            case "$line" in
+              *=*) ;;
+              *) echo "::error::profile_names entry '$line' must be BUNDLE_ID=PROFILE_NAME"; exit 1 ;;
+            esac
+            bundle="${line%%=*}"
+            expected_name="${line#*=}"
+            [ -n "$bundle" ] && [ -n "$expected_name" ] \
+              || { echo "::error::profile_names contains an empty bundle id or profile name"; exit 1; }
+            if grep -Fxq "$bundle" "$mapped_bundles"; then
+              echo "::error::profile_names contains duplicate bundle id '$bundle'"
+              exit 1
+            fi
+            echo "$bundle" >> "$mapped_bundles"
+          done <<< "$PROFILE_NAMES"
+
+          while IFS= read -r line || [ -n "$line" ]; do
+            [ -n "$line" ] || continue
+            case "$line" in
+              *=*) ;;
+              *) echo "::error::app_groups entry '$line' must be BUNDLE_ID=APP_GROUP"; exit 1 ;;
+            esac
+            bundle="${line%%=*}"
+            group="${line#*=}"
+            [ -n "$bundle" ] && [ -n "$group" ] \
+              || { echo "::error::app_groups contains an empty bundle id or group"; exit 1; }
+            profile_name_for "$bundle" >/dev/null \
+              || { echo "::error::$bundle app group '$group' has no profile_names mapping"; exit 1; }
+            case "$group" in
+              "$TEAM_ID".*) ;;
+              *) echo "::error::$bundle app group '$group' does not belong to signing team $TEAM_ID"; exit 1 ;;
+            esac
+          done <<< "$APP_GROUPS"
+
+          targets="$RUNNER_TEMP/release-profile-targets"
+          printf '%s\n' "$APP" > "$targets"
+          while IFS= read -r rel || [ -n "$rel" ]; do
+            [ -n "$rel" ] || continue
+            printf '%s\n' "$APP/$rel" >> "$targets"
+          done <<< "$APPEXES"
+
+          built_bundles="$RUNNER_TEMP/release-profile-built-bundles"
+          : > "$built_bundles"
+          index=0
+          while IFS= read -r target; do
+            plist="$target/Contents/Info.plist"
+            bundle="$(plutil -extract CFBundleIdentifier raw -o - "$plist")"
+            echo "$bundle" >> "$built_bundles"
+            expected_name="$(profile_name_for "$bundle" || true)"
+            if [ -z "$expected_name" ]; then
+              index=$((index + 1))
+              continue
+            fi
+
+            embedded="$target/Contents/embedded.provisionprofile"
+            test -f "$embedded" \
+              || { echo "::error::$bundle is missing embedded provisioning profile '$expected_name'"; exit 1; }
+            decoded="$RUNNER_TEMP/release-embedded-profile-$index.plist"
+            if ! security cms -D -i "$embedded" > "$decoded" 2>/dev/null; then
+              echo "::error::$bundle embedded provisioning profile could not be decoded"
+              exit 1
+            fi
+
+            actual_name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$decoded" 2>/dev/null || true)"
+            [ "$actual_name" = "$expected_name" ] \
+              || { echo "::error::$bundle embedded profile name '$actual_name' != '$expected_name'"; exit 1; }
+            profile_team="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$decoded" 2>/dev/null || true)"
+            [ "$profile_team" = "$TEAM_ID" ] \
+              || { echo "::error::$bundle embedded profile TeamIdentifier '$profile_team' != '$TEAM_ID'"; exit 1; }
+
+            authorized="$RUNNER_TEMP/release-profile-authorized-groups-$index"
+            plist_array "$decoded" ':Entitlements:com.apple.security.application-groups' > "$authorized"
+            while IFS= read -r group; do
+              [ -n "$group" ] || continue
+              group_authorized "$group" "$authorized" \
+                || { echo "::error::$bundle embedded profile does not authorize expected application group '$group' literally or as ${TEAM_ID}.*"; exit 1; }
+            done < <(groups_for "$bundle")
+            index=$((index + 1))
+          done < "$targets"
+
+          while IFS= read -r bundle; do
+            grep -Fxq "$bundle" "$built_bundles" \
+              || { echo "::error::profile_names maps unbuilt bundle '$bundle'"; exit 1; }
+          done < "$mapped_bundles"
 
       # Bespoke gate: caller-specific assertions against the built-but-
       # unnotarized .app (APP_PATH), before any Apple submission.
