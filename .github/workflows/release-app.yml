@@ -140,15 +140,17 @@ jobs:
             exit 1
           fi
           if [ "$DISABLE_LIBRARY_VALIDATION" != "false" ]; then
-            [ -n "$DISABLE_LIBRARY_VALIDATION" ] && [ "$DISABLE_LIBRARY_VALIDATION" != "true" ] \
-              || { echo "::error::disable_library_validation must name the audited dylib, not merely 'true'"; exit 1; }
+            if [ -z "$DISABLE_LIBRARY_VALIDATION" ] || [ "$DISABLE_LIBRARY_VALIDATION" = "true" ]; then
+              echo "::error::disable_library_validation must name the audited dylib, not merely 'true'"; exit 1
+            fi
             case "$DISABLE_LIBRARY_VALIDATION" in
               *[!A-Za-z0-9._+-]*) echo "::error::audited dylib reason '$DISABLE_LIBRARY_VALIDATION' is not a dylib name"; exit 1 ;;
             esac
           fi
           if [ -n "$CASK_TOKEN" ] || [ -n "$CASK_TEMPLATE_PATH" ]; then
-            [ -n "$CASK_TOKEN" ] && [ -n "$CASK_TEMPLATE_PATH" ] \
-              || { echo "::error::cask_token and cask_template_path must be set together"; exit 1; }
+            if [ -z "$CASK_TOKEN" ] || [ -z "$CASK_TEMPLATE_PATH" ]; then
+              echo "::error::cask_token and cask_template_path must be set together"; exit 1
+            fi
             if ! [[ "$CASK_TOKEN" =~ ^[a-z0-9]+([+._-][a-z0-9]+)*$ ]]; then
               echo "::error::cask_token '$CASK_TOKEN' is invalid"
               exit 1
