@@ -171,7 +171,10 @@ jobs:
             exit 0
           fi
 
-          base="$(git describe --tags --match 'v[0-9]*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+          # Stable tags only as the diff base: a prerelease base absorbs the app
+          # changes an rc carried, silently skipping them in the following stable
+          # release (and the cask, which publishes only on stable tags).
+          base="$(git describe --tags --match 'v[0-9]*' --exclude '*-*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
           if [ -z "$base" ]; then
             echo "No earlier v* tag is reachable; the app is considered changed."
             echo "changed=true" >> "$GITHUB_OUTPUT"
