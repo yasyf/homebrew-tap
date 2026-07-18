@@ -32,9 +32,9 @@ Four independent tag families version the shared release infrastructure in
   (run `import-developer-id` first). Consumers pin `@v1` after the floating major
   is force-moved onto the point tag that ships this.
 
-## Unreleased (`bun-v1` family)
+## bun-v1.0.0 — 2026-07-18 (`1db2d14`; `bun-v1` points here)
 
-First release of the Bun family:
+First pinned point release of the Bun family:
 
 - `release-bun.yml`, the one parameterized release workflow every bun-compiled
   CLI/TUI's `release.yml` collapses to. bun has no goreleaser builder, and a
