@@ -32,6 +32,28 @@ Four independent tag families version the shared release infrastructure in
   (run `import-developer-id` first). Consumers pin `@v1` after the floating major
   is force-moved onto the point tag that ships this.
 
+## Unreleased (`bun-v1` family)
+
+Both found by cc-pane's `v0.1.0-rc.1` prerelease dry-run:
+
+- Darwin legs sign with bun's documented codesign entitlements by default
+  (allow-jit, allow-unsigned-executable-memory,
+  disable-executable-page-protection, allow-dyld-environment-variables,
+  disable-library-validation — bun.com/docs/bundler/executables § Code signing
+  on macOS); the `entitlements` input now replaces the set instead of being the
+  only way to get one. disable-library-validation is the load-bearing
+  entitlement: a compiled bun binary extracts embedded native dylibs (FFI deps
+  like OpenTUI) to `$TMPDIR` and dlopens them, and under the hardened runtime
+  library validation rejects any dylib not signed with the process's Team ID —
+  the rc.1 binary launched (`--version` fine) but died initializing the TUI
+  with "mapping process and mapped file (non-platform) have different Team
+  IDs".
+- Darwin legs re-run `smoke-command` against the SIGNED binary after
+  sign-notarize-binary. The pre-sign smoke proves the build; signing rewrites
+  the Mach-O and the hardened runtime changes dyld behavior, so only a
+  post-sign smoke proves the artifact that ships (codesigning a bun binary
+  wrongly can break it outright — a bad local re-sign SIGTRAPs at launch).
+
 ## bun-v1.0.0 — 2026-07-18 (`1db2d14`; `bun-v1` points here)
 
 First pinned point release of the Bun family:

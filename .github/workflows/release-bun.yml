@@ -21,8 +21,9 @@
 # process.platform, making the target's platform package a hard build-time dep that
 # fails loud when absent. So each target builds on its own runner. macOS binaries are
 # Developer ID signed + notarized (bare Mach-O CLIs cannot be stapled — Gatekeeper
-# verifies the notarization against the cdhash online); absent the MACOS_* secrets they
-# ship unsigned with a warning, same as the Swift path. Linux binaries ship as GitHub
+# verifies the notarization against the cdhash online) with bun's documented codesign
+# entitlements by default (the `entitlements` input replaces the set); absent the
+# MACOS_* secrets they ship unsigned with a warning, same as the Swift path. Linux binaries ship as GitHub
 # release zips only (casks are macOS-only; the cask's on_linux stanzas serve Linuxbrew
 # opportunistically).
 #
@@ -59,7 +60,7 @@ on:
         type: string
         default: ""
       entitlements:
-        description: 'path to a codesign entitlements plist, exported as MACOS_CODESIGN_ENTITLEMENTS before signing (e.g. a com.apple.security.cs.allow-jit plist for a JIT runtime)'
+        description: 'path to a codesign entitlements plist replacing the default (bun''s documented codesign set: allow-jit, allow-unsigned-executable-memory, disable-executable-page-protection, allow-dyld-environment-variables, disable-library-validation); exported as MACOS_CODESIGN_ENTITLEMENTS before signing'
         type: string
         default: ""
       description:
@@ -215,14 +216,43 @@ jobs:
           "$BINARY" $SMOKE_ARGS
 
       - name: Export the entitlements path for codesign
-        if: ${{ startsWith(matrix.platform, 'darwin') && inputs.entitlements != '' }}
+        if: ${{ startsWith(matrix.platform, 'darwin') }}
         env:
           ENTITLEMENTS: ${{ inputs.entitlements }}
         run: |
           set -euo pipefail
-          test -f "$ENTITLEMENTS" || { echo "::error::entitlements '$ENTITLEMENTS' not found"; exit 1; }
-          # macos-codesign.sh test -f's this from an unknown cwd — resolve to absolute.
-          abs="$(cd "$(dirname "$ENTITLEMENTS")" && pwd)/$(basename "$ENTITLEMENTS")"
+          if [ -n "$ENTITLEMENTS" ]; then
+            test -f "$ENTITLEMENTS" || { echo "::error::entitlements '$ENTITLEMENTS' not found"; exit 1; }
+            # macos-codesign.sh test -f's this from an unknown cwd — resolve to absolute.
+            abs="$(cd "$(dirname "$ENTITLEMENTS")" && pwd)/$(basename "$ENTITLEMENTS")"
+          else
+            # The default is bun's documented codesign entitlements set
+            # (https://bun.com/docs/bundler/executables § Code signing on macOS).
+            # disable-library-validation is the load-bearing one: a compiled bun
+            # binary extracts embedded native dylibs (FFI deps like OpenTUI) to
+            # $TMPDIR and dlopens them, and under the hardened runtime library
+            # validation rejects any dylib not signed with the process's Team ID
+            # ("mapping process and mapped file have different Team IDs").
+            abs="$RUNNER_TEMP/bun-default-entitlements.plist"
+            cat > "$abs" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>com.apple.security.cs.allow-jit</key>
+              <true/>
+              <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+              <true/>
+              <key>com.apple.security.cs.disable-executable-page-protection</key>
+              <true/>
+              <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+              <true/>
+              <key>com.apple.security.cs.disable-library-validation</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+          fi
           echo "MACOS_CODESIGN_ENTITLEMENTS=$abs" >> "$GITHUB_ENV"
 
       - name: Import Developer ID certificate
@@ -244,6 +274,19 @@ jobs:
           tag: ${{ needs.setup.outputs.tag }}
           platform: ${{ matrix.platform }}
           attach-to-release: "false"
+
+      - name: Smoke-test the signed binary
+        if: ${{ startsWith(matrix.platform, 'darwin') && inputs.smoke-command != '' }}
+        env:
+          BINARY: ${{ steps.build.outputs.binary }}
+          SMOKE_ARGS: ${{ inputs.smoke-command }}
+        run: |
+          set -euo pipefail
+          # Signing rewrites the Mach-O and the hardened runtime changes dyld
+          # behavior — the pre-sign smoke proves the build; this proves the
+          # artifact that actually ships.
+          # shellcheck disable=SC2086  # intentional: smoke-command is a caller-provided arg list
+          "$BINARY" $SMOKE_ARGS
 
       - name: Package the linux binary
         if: ${{ startsWith(matrix.platform, 'linux') }}
