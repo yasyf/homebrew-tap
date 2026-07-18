@@ -1,0 +1,94 @@
+name: Build a bun single-file binary
+description: >-
+  Compile a bun entry point into a standalone single-file executable with one
+  `bun build --compile --target=…` invocation, then assert the produced Mach-O/ELF
+  matches the requested target (the bun analogue of build-swift-universal's
+  `lipo -archs` slice check — it catches a wrong `--target` or a runner mismatch).
+  The bun analogue of goreleaser's build stage (goreleaser has no bun builder).
+  Runs on the native runner for the target: bun refuses to extract
+  platform-mismatched optional deps, so real projects cross-compile no further than
+  a trivial one — release-bun.yml drives a 4-leg native-runner matrix. The toolchain
+  is the caller's job (release-bun.yml / the exercise job runs setup-bun with the
+  repo's `.bun-version` pin), matching build-swift-universal.
+
+inputs:
+  entry-point:
+    description: bun entry point compiled with --compile (relative to project-path)
+    required: false
+    default: src/index.ts
+  name:
+    description: output binary name (the cask/asset base name)
+    required: true
+  target:
+    description: 'bun --target: bun-darwin-arm64 | bun-darwin-x64 | bun-linux-x64 | bun-linux-arm64'
+    required: true
+  project-path:
+    description: directory containing package.json and the bun.lock lockfile
+    required: false
+    default: "."
+
+outputs:
+  binary:
+    description: absolute path to the compiled binary
+    value: ${{ steps.build.outputs.binary }}
+
+runs:
+  using: composite
+  steps:
+    - id: build
+      shell: bash
+      env:
+        ENTRY: ${{ inputs.entry-point }}
+        NAME: ${{ inputs.name }}
+        TARGET: ${{ inputs.target }}
+        PROJECT_PATH: ${{ inputs.project-path }}
+      run: |
+        set -euo pipefail
+        cd "$PROJECT_PATH"
+        test -f "$ENTRY" || { echo "::error::entry point '$ENTRY' not found under $PROJECT_PATH"; exit 1; }
+
+        # `bun install --frozen-lockfile` is the network-flaky part (registry + tarball
+        # fetches); retry it here so the compile below fails only on real build errors.
+        # --frozen-lockfile fails loud if bun.lock is stale or missing (the pin contract).
+        attempt=1
+        while :; do
+          if bun install --frozen-lockfile; then
+            break
+          fi
+          if [ "$attempt" -ge 3 ]; then
+            echo "::error::bun install --frozen-lockfile failed after 3 attempts"; exit 1
+          fi
+          echo "::warning::bun install failed (attempt $attempt/3); retrying in $((attempt * 15))s"
+          sleep "$((attempt * 15))"
+          attempt=$((attempt + 1))
+        done
+
+        # --target inlines process.platform, making the matching platform package a
+        # hard build-time dep that fails loud when absent (never a silent mis-build).
+        binary="$RUNNER_TEMP/bun-build/$NAME"
+        mkdir -p "$RUNNER_TEMP/bun-build"
+        bun build --compile --target="$TARGET" "$ENTRY" --outfile "$binary"
+
+        test -f "$binary" || { echo "::error::compiled binary not found at $binary"; exit 1; }
+        test -x "$binary" || { echo "::error::compiled binary $binary is not executable"; exit 1; }
+
+        # Format assert keyed on target: a dropped/wrong --target (or a matrix leg on
+        # the wrong runner) compiles green but produces the wrong architecture, which
+        # installs fine and breaks on the user's machine — catch it now, not in a report.
+        case "$TARGET" in
+          bun-darwin-arm64) needles=("Mach-O 64-bit executable arm64") ;;
+          bun-darwin-x64)   needles=("Mach-O 64-bit executable x86_64") ;;
+          bun-linux-x64)    needles=("ELF 64-bit" "x86-64") ;;
+          bun-linux-arm64)  needles=("ELF 64-bit" "aarch64") ;;
+          *) echo "::error::unknown target '$TARGET' (expected bun-{darwin-arm64,darwin-x64,linux-x64,linux-arm64})"; exit 1 ;;
+        esac
+        info="$(file -b "$binary")"
+        for needle in "${needles[@]}"; do
+          case "$info" in
+            *"$needle"*) ;;
+            *) echo "::error::$binary is not a $TARGET artifact (file: $info; missing '$needle')"; exit 1 ;;
+          esac
+        done
+
+        echo "binary=$binary" >> "$GITHUB_OUTPUT"
+        echo "build-bun-binary: $binary ($info)"

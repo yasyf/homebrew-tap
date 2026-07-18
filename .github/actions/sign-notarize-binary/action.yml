@@ -3,25 +3,35 @@ description: >-
   The shared tail for shipping a bare Mach-O CLI as a Homebrew cask: Developer ID
   codesign + notarize it via $MACOS_CODESIGN_SCRIPT (the canonical macos-codesign.sh
   — graceful no-op unsigned, 3x submit retry, fail-loud on a non-Accepted verdict),
-  ditto-zip it into dist/<name>-<tag>-darwin-universal.zip with a .sha256 and a
+  ditto-zip it into dist/<name>-<tag>-<platform>.zip with a .sha256 and a
   checksums.txt, and (by default) create/attach to the tag's GitHub release.
   Outputs the zip's sha256 for the cask render. A bare binary cannot be stapled
   (stapler is .app/.dmg/.pkg-only); Gatekeeper verifies the notarization against
   the cdhash online, same as the Go pipeline's quill path. Language-agnostic —
-  any Mach-O CLI (Swift, Rust, C) works. Requires the import-developer-id action
-  to have run first (it exports $MACOS_CODESIGN_SCRIPT even on an unsigned build).
-  Pair with render-formula (Casks/<name>.rb, filling __SHA__) + publish.
+  any Mach-O CLI (Swift, Rust, C) works. Signing is darwin-only: callers must pass
+  a darwin platform (the default darwin-universal, or a per-arch darwin-arm64 /
+  darwin-x64) — release-bun.yml only invokes this on its darwin matrix legs, never
+  the linux ones. Requires the import-developer-id action to have run first (it
+  exports $MACOS_CODESIGN_SCRIPT even on an unsigned build). Pair with
+  render-formula (Casks/<name>.rb, filling __SHA__) + publish.
 
 inputs:
   binary:
     description: path to the built CLI binary
     required: true
   name:
-    description: cask/asset base name (the zip is dist/<name>-<tag>-darwin-universal.zip)
+    description: cask/asset base name (the zip is dist/<name>-<tag>-<platform>.zip)
     required: true
   tag:
     description: release tag the asset belongs to (explicit — github.ref_name is wrong under auto-tag)
     required: true
+  platform:
+    description: >-
+      artifact platform suffix — the zip is dist/<name>-<tag>-<platform>.zip.
+      Also the codesign slice label (dashes to underscores); darwin-prefixed
+      values engage signing. Default preserves the Swift family's universal naming.
+    required: false
+    default: "darwin-universal"
   attach-to-release:
     description: attach the zip + its .sha256 + checksums.txt to the tag's release
     required: false
@@ -51,6 +61,7 @@ runs:
         BINARY: ${{ inputs.binary }}
         NAME: ${{ inputs.name }}
         TAG: ${{ inputs.tag }}
+        PLATFORM: ${{ inputs.platform }}
       run: |
         set -euo pipefail
         test -f "$BINARY" || { echo "::error::binary '$BINARY' not found"; exit 1; }
@@ -59,14 +70,16 @@ runs:
           echo "::warning::no signing identity — shipping an unsigned binary (set the MACOS_* secrets to sign + notarize)"
         fi
 
-        # Sign + notarize in one call. The script keys on the darwin_ prefix only;
-        # darwin_all names the universal slice honestly.
-        bash "$MACOS_CODESIGN_SCRIPT" "$BINARY" darwin_all
+        # Sign + notarize in one call. The script keys on the darwin_ prefix only,
+        # so a per-arch slice label (darwin_arm64) is behavior-identical to the
+        # universal darwin_all — it names the slice being signed honestly.
+        slice="${PLATFORM//-/_}"
+        bash "$MACOS_CODESIGN_SCRIPT" "$BINARY" "$slice"
 
         # ditto -c -k archives the bare binary at the zip root — exactly where the
         # cask's `binary` stanza expects it.
         mkdir -p dist
-        zip="dist/${NAME}-${TAG}-darwin-universal.zip"
+        zip="dist/${NAME}-${TAG}-${PLATFORM}.zip"
         ditto -c -k "$BINARY" "$zip"
         sha="$(shasum -a 256 "$zip" | awk '{print $1}')"
         shasum -a 256 "$zip" > "$zip.sha256"
