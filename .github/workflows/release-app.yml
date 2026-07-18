@@ -63,6 +63,13 @@ on:
         description: newline-separated shell globs; skip the app release when none changed since the previous v* tag
         type: string
         default: ""
+      assert_script:
+        description: >-
+          optional path (relative to the caller's checkout) to a bash gate run
+          after the xcodebuild build and before notarization, with APP_PATH set
+          to the built .app; a non-zero exit fails the release. Empty skips it.
+        type: string
+        default: ""
     secrets:
       MACOS_SIGN_P12:
         required: false
@@ -559,6 +566,19 @@ jobs:
             [ "$build" = "$CURRENT_PROJECT_VERSION" ] \
               || { echo "::error::$target has CFBundleVersion '$build', expected '$CURRENT_PROJECT_VERSION'"; exit 1; }
           done < "$targets"
+
+      # Bespoke gate: caller-specific assertions against the built-but-
+      # unnotarized .app (APP_PATH), before any Apple submission.
+      - name: Run the caller's application assertions
+        if: ${{ inputs.assert_script != '' }}
+        env:
+          APP_PATH: ${{ steps.project.outputs.app }}
+          ASSERT_SCRIPT: ${{ inputs.assert_script }}
+        run: |
+          set -euo pipefail
+          test -f "$ASSERT_SCRIPT" \
+            || { echo "::error::assert_script '$ASSERT_SCRIPT' not found in the caller checkout"; exit 1; }
+          bash "$ASSERT_SCRIPT"
 
       - name: Disable notarization after profile resolution
         if: ${{ !inputs.notarize }}
