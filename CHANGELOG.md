@@ -1,9 +1,9 @@
 # Changelog
 
-Three independent tag families version the shared release infrastructure in
-`.github/`. Consumers pin a floating major (`@v1`, `@pypi-v1`, or `@swift-v1`);
-each move of a floating major is anchored by an immutable point tag (`v1.0.0`,
-`pypi-v1.0.0`, `swift-v1.0.0`, …).
+Four independent tag families version the shared release infrastructure in
+`.github/`. Consumers pin a floating major (`@v1`, `@pypi-v1`, `@swift-v1`, or
+`@bun-v1`); each move of a floating major is anchored by an immutable point tag
+(`v1.0.0`, `pypi-v1.0.0`, `swift-v1.0.0`, `bun-v1.0.0`, …).
 
 - **`v1` family** — Go: the composite actions (`verify-tag-on-main`,
   `import-developer-id` + `macos-codesign.sh`, `render-formula`,
@@ -12,6 +12,8 @@ each move of a floating major is anchored by an immutable point tag (`v1.0.0`,
 - **`pypi-v1` family** — Python: the `release-pypi-build.yml` reusable workflow.
 - **`swift-v1` family** — Swift: the `release-swift.yml` reusable workflow and
   the `build-swift-universal` + `sign-notarize-binary` composite actions.
+- **`bun-v1` family** — Bun: the `release-bun.yml` reusable workflow and the
+  `build-bun-binary` composite action.
 
 ## Unreleased (`v1` family)
 
@@ -29,6 +31,40 @@ each move of a floating major is anchored by an immutable point tag (`v1.0.0`,
   `MACOS_SIGN_IDENTITY` / `MACOS_NOTARY_*` from the env like `sign-notarize-app`
   (run `import-developer-id` first). Consumers pin `@v1` after the floating major
   is force-moved onto the point tag that ships this.
+
+## Unreleased (`bun-v1` family)
+
+First release of the Bun family:
+
+- `release-bun.yml`, the one parameterized release workflow every bun-compiled
+  CLI/TUI's `release.yml` collapses to. bun has no goreleaser builder, and a
+  project with platform-native deps can't cross-compile (bun refuses to extract
+  a platform-mismatched optional dep; `--target` inlines `process.platform`,
+  making the target's platform package a hard build-time dep), so each target
+  builds on its own native runner: verify-tag-on-main (or the idempotent
+  go-style auto-tag), a 4-leg matrix (darwin-arm64/macos-15,
+  darwin-x64/macos-15-intel, linux-x64/ubuntu-24.04,
+  linux-arm64/ubuntu-24.04-arm) with `.bun-version` as the mandatory toolchain
+  pin, codesign + notarytool on the darwin legs, one release-job softprops call
+  owning the GitHub release (prerelease on hyphenated tags, which skip the
+  cask), and a rendered 4-platform binary cask (on_macos/on_linux ×
+  on_arm/on_intel, quarantine-strip postflight) published via `render-formula`
+  custom tokens (the auto-sha path is goreleaser-naming-hardwired). Zero-config:
+  every input defaults — entry point `src/index.ts`, binary/cask named after
+  the repo. An `entitlements` input exports a codesign entitlements plist for
+  JIT runtimes under the hardened runtime.
+- `build-bun-binary`: frozen `bun install` retried 3x, `bun build --compile
+  --target=bun-<platform>`, executable + `file`-keyed Mach-O/ELF format assert
+  (the `lipo -archs` analogue; refuses targets outside the release matrix).
+- `sign-notarize-binary` (swift-v1 family) gains an optional `platform` input
+  defaulting to `darwin-universal` — the default path is behavior-identical, so
+  swift callers are untouched; `release-bun.yml` passes the per-arch platform to
+  name `<name>-<tag>-<platform>.zip` and the codesign slice label.
+- actionlint bumped 1.7.7 → 1.7.12 in `test.yml` (1.7.7 predates the
+  `macos-15-intel` runner label).
+- None of this exists at `v1`: bun callers pin `@bun-v1`, and so does every
+  `uses:` inside `release-bun.yml` itself, so the bun family repoints without
+  ever moving `v1` or `swift-v1`.
 
 ## v1.1.1 — 2026-07-09 (`f010672`; `v1` points here)
 
@@ -129,7 +165,9 @@ First pinned point release of the Swift family:
 1. Land the change on `main` (CI in `test.yml` must be green — a floating-major
    move ships to every fleet repo at once).
 2. Cut the next immutable point tag:
-   `git tag vX.Y.Z && git push origin vX.Y.Z` (or `pypi-vX.Y.Z`). Point tags
-   are protected by a repository ruleset and never move.
+   `git tag vX.Y.Z && git push origin vX.Y.Z` (or `pypi-vX.Y.Z` /
+   `swift-vX.Y.Z` / `bun-vX.Y.Z`). Point tags are protected by a repository
+   ruleset and never move.
 3. Force-move the floating major consumers pin:
-   `git tag -f v1 vX.Y.Z && git push -f origin v1` (or `pypi-v1`).
+   `git tag -f v1 vX.Y.Z && git push -f origin v1` (or `pypi-v1` / `swift-v1` /
+   `bun-v1`).

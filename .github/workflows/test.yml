@@ -25,7 +25,10 @@ jobs:
       # inline-shell job — actionlint only sees workflows).
       - name: actionlint over .github/workflows/ (pinned)
         run: |
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7 "$RUNNER_TEMP"
+          # 1.7.12: the first pins that predated macos-15-intel (1.7.7) reject the bun
+          # matrix's Intel/arm runner labels — 1.7.8+ knows macos-15-intel and
+          # ubuntu-24.04-arm.
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
 
   shellcheck:
@@ -184,6 +187,77 @@ jobs:
           ditto -x -k "$ZIP" "$RUNNER_TEMP/swift-unzipped"
           out="$("$RUNNER_TEMP/swift-unzipped/swift-hello")"
           [ "$out" = "hello from swift" ] || { echo "::error::unzipped binary broken (output '$out')"; exit 1; }
+
+      # --- Bun family (BOTH OS legs — the linux build/assert is new coverage) ---
+      # Known coverage gap: release-bun.yml's setup/release jobs (idempotent auto-tag,
+      # formula-collision guard, 4-leg artifact aggregation, single-release creation,
+      # cask publish) can't run here — they need a real tag + release. They're exercised
+      # only by consumer releases — validate with an rc tag on the first consumer before
+      # repointing bun-v1. build-bun-binary and the sign-notarize `platform` input DO run
+      # here, on both runner OSes.
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Scaffold a hello bun project
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bun-hello/src"
+          cd "$RUNNER_TEMP/bun-hello"
+          printf '{"name":"bun-hello","private":true}\n' > package.json
+          printf 'console.log("hello from bun")\n' > src/index.ts
+          # build-bun-binary runs `bun install --frozen-lockfile`, so bun.lock must exist.
+          bun install
+
+      - name: build-bun-binary on the hello project
+        id: bun-build
+        uses: ./.github/actions/build-bun-binary
+        with:
+          name: bun-hello
+          target: ${{ runner.os == 'macOS' && 'bun-darwin-arm64' || 'bun-linux-x64' }}
+          project-path: ${{ runner.temp }}/bun-hello
+
+      - name: Assert the bun binary
+        env:
+          BINARY: ${{ steps.bun-build.outputs.binary }}
+        run: |
+          set -euo pipefail
+          # Run from an empty cwd — the standalone-compile proof (the format assert
+          # already ran inside the action).
+          mkdir -p "$RUNNER_TEMP/bun-emptycwd"
+          cd "$RUNNER_TEMP/bun-emptycwd"
+          out="$("$BINARY")"
+          [ "$out" = "hello from bun" ] || { echo "::error::unexpected bun binary output '$out'"; exit 1; }
+
+      # macOS leg additionally exercises the sign-notarize `platform` input on the
+      # per-arch naming path; the swift steps above keep asserting the darwin-universal
+      # default — that pairing is the backwards-compat regression test.
+      - name: sign-notarize-binary per-arch naming (unsigned path)
+        if: runner.os == 'macOS'
+        id: bun-pkg
+        uses: ./.github/actions/sign-notarize-binary
+        with:
+          binary: ${{ steps.bun-build.outputs.binary }}
+          name: bun-hello
+          tag: v9.9.9
+          platform: darwin-arm64
+          attach-to-release: "false"
+
+      - name: Assert the per-arch zip
+        if: runner.os == 'macOS'
+        env:
+          ZIP: ${{ steps.bun-pkg.outputs.zip }}
+          SHA: ${{ steps.bun-pkg.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          [ "$ZIP" = "dist/bun-hello-v9.9.9-darwin-arm64.zip" ] || { echo "::error::unexpected zip path '$ZIP'"; exit 1; }
+          [ -f "$ZIP" ] || { echo "::error::zip missing"; exit 1; }
+          [ -f "$ZIP.sha256" ] || { echo "::error::.sha256 missing"; exit 1; }
+          recomputed="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+          [ "$SHA" = "$recomputed" ] || { echo "::error::sha256 output ($SHA) != recomputed ($recomputed)"; exit 1; }
+          grep -q 'bun-hello-v9.9.9-darwin-arm64.zip' dist/checksums.txt || { echo "::error::zip not in checksums.txt"; exit 1; }
+          # The cask's `binary` stanza needs the binary at the zip root, executable.
+          ditto -x -k "$ZIP" "$RUNNER_TEMP/bun-unzipped"
+          out="$("$RUNNER_TEMP/bun-unzipped/bun-hello")"
+          [ "$out" = "hello from bun" ] || { echo "::error::unzipped bun binary broken (output '$out')"; exit 1; }
 
       - name: render-formula fills the tokens
         id: render

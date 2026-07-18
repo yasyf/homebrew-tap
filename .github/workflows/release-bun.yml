@@ -1,0 +1,458 @@
+# The single reusable release workflow for every bun-compiled TUI/CLI in the fleet.
+# bun has no goreleaser builder, so — like release-swift.yml — this workflow owns the
+# whole job by hand: verify-tag-on-main (or an idempotent auto-tag), a native-runner
+# build matrix producing single-file binaries, Developer ID codesign + notarytool on
+# the darwin legs, one GitHub release, and a rendered binary cask pushed to this tap.
+# Each repo's release.yml collapses to a `uses:` line; the logic lives here, pinned
+# `@bun-v1` (release-bun.yml does not exist at `v1` — bun callers must pin the bun
+# family).
+#
+# Zero-config contract: every input defaults. The bun entry point is src/index.ts, the
+# binary / cask are named after the repo, and a `.bun-version` file MUST pin the bun
+# toolchain in-repo (the build guards fail loud when it is missing). desc/homepage come
+# from the repo metadata in the push-event payload.
+#
+# Callers MUST use `secrets: inherit` (forwards HOMEBREW_TAP_TOKEN + the five MACOS_*).
+# Minimal caller:
+#   jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-bun.yml@bun-v1, secrets: inherit } }
+#
+# Why a 4-leg native-runner matrix (no cross-compile): bun refuses to extract
+# platform-mismatched optional deps, and `bun build --compile --target=…` inlines
+# process.platform, making the target's platform package a hard build-time dep that
+# fails loud when absent. So each target builds on its own runner. macOS binaries are
+# Developer ID signed + notarized (bare Mach-O CLIs cannot be stapled — Gatekeeper
+# verifies the notarization against the cdhash online); absent the MACOS_* secrets they
+# ship unsigned with a warning, same as the Swift path. Linux binaries ship as GitHub
+# release zips only (casks are macOS-only; the cask's on_linux stanzas serve Linuxbrew
+# opportunistically).
+#
+# Hyphenated tags (v1.0.0-rc.1) publish a prerelease GitHub release and SKIP the cask —
+# brew has no prerelease channel, so the tap only ever advances on final tags.
+
+name: release-bun (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      entry-point:
+        description: bun entry point compiled with --compile
+        type: string
+        default: src/index.ts
+      name:
+        description: binary / cask / asset base name (default = repo name)
+        type: string
+        default: ${{ github.event.repository.name }}
+      auto-tag:
+        description: 'release on push to main with a monotonic v0.1.<run_number> tag (skips verify-tag-on-main)'
+        type: boolean
+        default: false
+      pre-build:
+        description: 'repo-specific runner setup run on every matrix leg before the build (install toolchains, echo env to $GITHUB_ENV)'
+        type: string
+        default: ""
+      run-tests:
+        description: run `bun test` on the release toolchain after the build, before signing
+        type: boolean
+        default: false
+      smoke-command:
+        description: 'args appended to the built binary and executed on each native leg (e.g. --version); empty runs the format assert only'
+        type: string
+        default: ""
+      entitlements:
+        description: 'path to a codesign entitlements plist, exported as MACOS_CODESIGN_ENTITLEMENTS before signing (e.g. a com.apple.security.cs.allow-jit plist for a JIT runtime)'
+        type: string
+        default: ""
+      description:
+        description: cask desc (default = the repo description, falling back to "<name> command-line tool")
+        type: string
+        default: ""
+      homepage:
+        description: cask homepage (default = the repo homepage, falling back to the repo URL)
+        type: string
+        default: ""
+      cask-template:
+        description: 'path to a repo-provided cask .rb template (tokens __NAME__/__VERSION__/__REPO__/__DESC__/__HOMEPAGE__/__SHA_DARWIN_ARM64__/__SHA_DARWIN_X64__/__SHA_LINUX_X64__/__SHA_LINUX_ARM64__); empty renders the standard 4-platform binary cask'
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify the tag is on main
+        if: ${{ !inputs.auto-tag }}
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@bun-v1
+
+      - name: Resolve the release tag
+        id: tag
+        env:
+          AUTO_TAG: ${{ inputs.auto-tag }}
+        run: |
+          set -euo pipefail
+          if [ "$AUTO_TAG" = "true" ]; then
+            # Reruns of a failed release keep the same run_number, so this must be
+            # idempotent: a tag already at THIS commit is reused (a release that died
+            # after the tag — e.g. a missing secret — stays rerunnable), a tag at a
+            # DIFFERENT commit is a real conflict that fails loud. We check both the
+            # fetched clone and origin, and never retag or force. (The idempotent
+            # release-go block, minus the goreleaser env export.)
+            TAG="v0.1.${{ github.run_number }}"
+            SHA="$(git rev-parse HEAD)"
+            existing=""
+            if local_sha="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}")"; then
+              existing="$local_sha"
+            fi
+            # A ^{} refspec peels an annotated tag to its commit; a lightweight one
+            # (what this step creates) yields the plain line, whose sha is the commit.
+            remote_ls="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" || true)"
+            if [ -n "$remote_ls" ]; then
+              remote_sha="$(printf '%s\n' "$remote_ls" | awk '/\^\{\}$/ {print $1}' | tail -n1)"
+              [ -n "$remote_sha" ] || remote_sha="$(printf '%s\n' "$remote_ls" | awk 'NR==1 {print $1}')"
+              if [ -n "$existing" ] && [ "$existing" != "$remote_sha" ]; then
+                echo "::error::tag $TAG is $existing locally but $remote_sha on origin"; exit 1
+              fi
+              existing="$remote_sha"
+            fi
+            if [ -n "$existing" ]; then
+              if [ "$existing" != "$SHA" ]; then
+                echo "::error::tag $TAG already exists at $existing but this run targets $SHA; refusing to retag (delete the stale tag or re-run from a fresh push)"; exit 1
+              fi
+              echo "tag $TAG already exists at $SHA; reusing it (idempotent re-run)"
+            else
+              git tag "$TAG" "$SHA"
+              git push origin "$TAG"
+            fi
+          else
+            # A hand-rolled release must assert the trigger explicitly or a
+            # branch-triggered misconfiguration ships a garbage tag.
+            case "$GITHUB_REF" in
+              refs/tags/v*) TAG="$GITHUB_REF_NAME" ;;
+              *) echo "::error::release-bun.yml must run on a v* tag push (got $GITHUB_REF) — or set auto-tag: true"; exit 1 ;;
+            esac
+          fi
+          {
+            echo "tag=$TAG"
+            echo "version=${TAG#v}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Guard against a same-named formula in the tap
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          # Explicit status handling — a bare `if curl -fsS` would fail OPEN on DNS
+          # errors, 429 throttling, or 5xx, silently skipping the guard.
+          code="$(curl -s -o /dev/null -w '%{http_code}' "https://raw.githubusercontent.com/yasyf/homebrew-tap/main/Formula/${NAME}.rb" || echo 000)"
+          case "$code" in
+            404) ;;
+            200)
+              echo "::error::Formula/${NAME}.rb already exists in the tap — a same-named cask makes 'brew install ${NAME}' ambiguous; rename the binary or retire the formula"
+              exit 1
+              ;;
+            *)
+              echo "::error::formula collision check got HTTP ${code} from raw.githubusercontent.com — refusing to release blind; re-run when it recovers"
+              exit 1
+              ;;
+          esac
+
+  build:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: darwin-arm64, runner: macos-15 }
+          - { platform: darwin-x64, runner: macos-15-intel }
+          - { platform: linux-x64, runner: ubuntu-24.04 }
+          - { platform: linux-arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Guard the bun pin
+        run: |
+          set -euo pipefail
+          test -f .bun-version || { echo "::error::no .bun-version — pin the bun toolchain with a .bun-version file at the repo root"; exit 1; }
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Repo-specific pre-build setup
+        if: ${{ inputs.pre-build != '' }}
+        run: ${{ inputs.pre-build }}
+
+      - name: Build the bun binary
+        id: build
+        uses: yasyf/homebrew-tap/.github/actions/build-bun-binary@bun-v1
+        with:
+          entry-point: ${{ inputs.entry-point }}
+          name: ${{ inputs.name }}
+          target: bun-${{ matrix.platform }}
+
+      - name: Test
+        if: ${{ inputs.run-tests }}
+        run: bun test
+
+      - name: Smoke-test the binary
+        if: ${{ inputs.smoke-command != '' }}
+        env:
+          BINARY: ${{ steps.build.outputs.binary }}
+          SMOKE_ARGS: ${{ inputs.smoke-command }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086  # intentional: smoke-command is a caller-provided arg list
+          "$BINARY" $SMOKE_ARGS
+
+      - name: Export the entitlements path for codesign
+        if: ${{ startsWith(matrix.platform, 'darwin') && inputs.entitlements != '' }}
+        env:
+          ENTITLEMENTS: ${{ inputs.entitlements }}
+        run: |
+          set -euo pipefail
+          test -f "$ENTITLEMENTS" || { echo "::error::entitlements '$ENTITLEMENTS' not found"; exit 1; }
+          # macos-codesign.sh test -f's this from an unknown cwd — resolve to absolute.
+          abs="$(cd "$(dirname "$ENTITLEMENTS")" && pwd)/$(basename "$ENTITLEMENTS")"
+          echo "MACOS_CODESIGN_ENTITLEMENTS=$abs" >> "$GITHUB_ENV"
+
+      - name: Import Developer ID certificate
+        if: ${{ startsWith(matrix.platform, 'darwin') }}
+        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@bun-v1
+        with:
+          p12: ${{ secrets.MACOS_SIGN_P12 }}
+          p12-password: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          notary-key: ${{ secrets.MACOS_NOTARY_KEY }}
+          notary-key-id: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          notary-issuer-id: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+
+      - name: Sign, notarize, package (darwin)
+        if: ${{ startsWith(matrix.platform, 'darwin') }}
+        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-binary@bun-v1
+        with:
+          binary: ${{ steps.build.outputs.binary }}
+          name: ${{ inputs.name }}
+          tag: ${{ needs.setup.outputs.tag }}
+          platform: ${{ matrix.platform }}
+          attach-to-release: "false"
+
+      - name: Package the linux binary
+        if: ${{ startsWith(matrix.platform, 'linux') }}
+        env:
+          BINARY: ${{ steps.build.outputs.binary }}
+          NAME: ${{ inputs.name }}
+          TAG: ${{ needs.setup.outputs.tag }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          zip="dist/${NAME}-${TAG}-${PLATFORM}.zip"
+          # -j drops the path prefix so the bare executable sits at the zip root (the
+          # cask `binary` stanza contract), matching the darwin ditto path.
+          zip -j "$zip" "$BINARY"
+          shasum -a 256 "$zip" > "$zip.sha256"
+
+      - name: Upload the platform artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ matrix.platform }}
+          path: dist/
+          if-no-files-found: error
+          overwrite: true
+
+  release:
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+
+      - name: Assert exactly the four platform zips
+        env:
+          NAME: ${{ inputs.name }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          set -euo pipefail
+          expected=(
+            "dist/${NAME}-${TAG}-darwin-arm64.zip"
+            "dist/${NAME}-${TAG}-darwin-x64.zip"
+            "dist/${NAME}-${TAG}-linux-x64.zip"
+            "dist/${NAME}-${TAG}-linux-arm64.zip"
+          )
+          for z in "${expected[@]}"; do
+            test -f "$z" || { echo "::error::missing expected artifact $z"; ls -la dist/ || true; exit 1; }
+          done
+          count="$(find dist -maxdepth 1 -name '*.zip' | wc -l | tr -d ' ')"
+          [ "$count" -eq 4 ] || { echo "::error::expected exactly 4 zips, found $count"; ls -la dist/; exit 1; }
+
+      - name: Build the unified checksums.txt
+        run: |
+          set -euo pipefail
+          (cd dist && shasum -a 256 -- *.zip > checksums.txt)
+
+      # Single release-creation point: the matrix legs never attach (attach-to-release:
+      # false), avoiding the softprops concurrent-create race — one call here owns the
+      # release, its notes, and the prerelease flag.
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.setup.outputs.tag }}
+          files: |
+            dist/*.zip
+            dist/*.zip.sha256
+            dist/checksums.txt
+          generate_release_notes: true
+          prerelease: ${{ contains(needs.setup.outputs.tag, '-') }}
+
+      # A hyphenated tag (v1.0.0-rc.1) publishes a PRERELEASE GitHub release; the cask
+      # must not advance to it — brew has no prerelease channel, so publishing would
+      # make the rc the live `brew install` version.
+      - name: Resolve cask metadata
+        if: ${{ !contains(needs.setup.outputs.tag, '-') }}
+        id: meta
+        env:
+          DESCRIPTION: ${{ inputs.description }}
+          HOMEPAGE: ${{ inputs.homepage }}
+          NAME: ${{ inputs.name }}
+          REPO_DESC: ${{ github.event.repository.description }}
+          REPO_HOMEPAGE: ${{ github.event.repository.homepage }}
+          REPO_URL: ${{ github.event.repository.html_url }}
+        run: |
+          set -euo pipefail
+          desc="${DESCRIPTION:-$REPO_DESC}"
+          desc="${desc:-$NAME command-line tool}"
+          # The value rides through a sed 's|…|…|g' substitution and lands in a Ruby
+          # double-quoted string — strip the delimiter, neutralize the quotes, and
+          # escape sed's replacement-string specials (a bare '&' expands to the whole
+          # matched token, i.e. "Search & replace" would render "Search __DESC__ replace").
+          desc="$(printf '%s' "$desc" | tr -d '|' | tr '"' "'")"
+          desc="${desc//\\/\\\\}"
+          desc="${desc//&/\\&}"
+          home="${HOMEPAGE:-$REPO_HOMEPAGE}"
+          home="${home:-$REPO_URL}"
+          home="$(printf '%s' "$home" | tr -d '|"')"
+          home="${home//\\/\\\\}"
+          home="${home//&/\\&}"
+          {
+            echo "desc=$desc"
+            echo "homepage=$home"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Materialize the cask template
+        if: ${{ !contains(needs.setup.outputs.tag, '-') }}
+        env:
+          CASK_TEMPLATE: ${{ inputs.cask-template }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CASK_TEMPLATE" ]; then
+            test -f "$CASK_TEMPLATE" || { echo "::error::cask-template '$CASK_TEMPLATE' not found"; exit 1; }
+            cp "$CASK_TEMPLATE" "$RUNNER_TEMP/cask.rb.tmpl"
+            exit 0
+          fi
+          # The standard 4-platform binary cask: on_macos/on_linux × on_arm/on_intel,
+          # one zip per target. postflight strips the quarantine xattr — essential for
+          # an unsigned fallback release, harmless (already passing Gatekeeper) for a
+          # notarized one. No depends_on macos: a bun binary carries no SDK floor.
+          cat > "$RUNNER_TEMP/cask.rb.tmpl" <<'EOF'
+          # This file was generated by release-bun.yml. DO NOT EDIT.
+          cask "__NAME__" do
+            version "__VERSION__"
+
+            on_macos do
+              on_arm do
+                sha256 "__SHA_DARWIN_ARM64__"
+                url "https://github.com/__REPO__/releases/download/v#{version}/__NAME__-v#{version}-darwin-arm64.zip"
+              end
+              on_intel do
+                sha256 "__SHA_DARWIN_X64__"
+                url "https://github.com/__REPO__/releases/download/v#{version}/__NAME__-v#{version}-darwin-x64.zip"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                sha256 "__SHA_LINUX_ARM64__"
+                url "https://github.com/__REPO__/releases/download/v#{version}/__NAME__-v#{version}-linux-arm64.zip"
+              end
+              on_intel do
+                sha256 "__SHA_LINUX_X64__"
+                url "https://github.com/__REPO__/releases/download/v#{version}/__NAME__-v#{version}-linux-x64.zip"
+              end
+            end
+
+            name "__NAME__"
+            desc "__DESC__"
+            homepage "__HOMEPAGE__"
+
+            binary "__NAME__"
+
+            postflight do
+              if OS.mac?
+                system_command "/usr/bin/xattr",
+                               args: ["-dr", "com.apple.quarantine", "#{staged_path}/__NAME__"]
+              end
+            end
+
+            livecheck do
+              skip "Auto-generated on release."
+            end
+          end
+          EOF
+
+      - name: Compute the platform checksums
+        if: ${{ !contains(needs.setup.outputs.tag, '-') }}
+        id: shas
+        env:
+          NAME: ${{ inputs.name }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          set -euo pipefail
+          sha() { shasum -a 256 "dist/${NAME}-${TAG}-$1.zip" | awk '{print $1}'; }
+          {
+            echo "darwin_arm64=$(sha darwin-arm64)"
+            echo "darwin_x64=$(sha darwin-x64)"
+            echo "linux_x64=$(sha linux-x64)"
+            echo "linux_arm64=$(sha linux-arm64)"
+          } >> "$GITHUB_OUTPUT"
+
+      # NOT the render-formula auto-sha path (name: omitted): that path is hardwired to
+      # goreleaser's name_version_os_arch.tar.gz naming. The bun zips are named
+      # differently, so every sha rides through as a custom substitution token.
+      - name: Render the cask
+        if: ${{ !contains(needs.setup.outputs.tag, '-') }}
+        uses: yasyf/homebrew-tap/.github/actions/render-formula@bun-v1
+        with:
+          template: ${{ runner.temp }}/cask.rb.tmpl
+          output: Casks/${{ inputs.name }}.rb
+          version: ${{ needs.setup.outputs.version }}
+          substitutions: |
+            __NAME__=${{ inputs.name }}
+            __REPO__=${{ github.repository }}
+            __DESC__=${{ steps.meta.outputs.desc }}
+            __HOMEPAGE__=${{ steps.meta.outputs.homepage }}
+            __SHA_DARWIN_ARM64__=${{ steps.shas.outputs.darwin_arm64 }}
+            __SHA_DARWIN_X64__=${{ steps.shas.outputs.darwin_x64 }}
+            __SHA_LINUX_X64__=${{ steps.shas.outputs.linux_x64 }}
+            __SHA_LINUX_ARM64__=${{ steps.shas.outputs.linux_arm64 }}
+
+      - name: Publish the cask to the tap
+        if: ${{ !contains(needs.setup.outputs.tag, '-') }}
+        uses: yasyf/homebrew-tap/.github/actions/publish@bun-v1
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          dir: tap-staging
+          message: "${{ inputs.name }} ${{ needs.setup.outputs.tag }}"
