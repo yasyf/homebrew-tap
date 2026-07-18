@@ -320,6 +320,18 @@ jobs:
           # shellcheck disable=SC2153 # PROJECT_DIR is supplied through the step env.
           project_dir="$(cd "$PROJECT_DIR" && pwd)"
           cd "$project_dir"
+
+          # Write the per-build Version.xcconfig BEFORE xcodegen generate: a
+          # project.yml that wires it in through configFiles fails spec
+          # validation when the file is absent. The build number is the commit
+          # count — monotonic and reproducible.
+          current_project_version="$(git -C "$GITHUB_WORKSPACE" rev-list --count HEAD)"
+          version_xcconfig="$project_dir/Version.xcconfig"
+          {
+            printf 'MARKETING_VERSION = %s\n' "$MARKETING_VERSION"
+            printf 'CURRENT_PROJECT_VERSION = %s\n' "$current_project_version"
+          } > "$version_xcconfig"
+
           xcodegen generate
 
           shopt -s nullglob
@@ -328,12 +340,6 @@ jobs:
             echo "::error::expected exactly one generated .xcodeproj in $project_dir, found ${#projects[@]}"
             exit 1
           fi
-          current_project_version="$(git -C "$GITHUB_WORKSPACE" rev-list --count HEAD)"
-          version_xcconfig="$RUNNER_TEMP/release-version.xcconfig"
-          {
-            printf 'MARKETING_VERSION = %s\n' "$MARKETING_VERSION"
-            printf 'CURRENT_PROJECT_VERSION = %s\n' "$current_project_version"
-          } > "$version_xcconfig"
           {
             echo "project=${projects[0]}"
             echo "version-xcconfig=$version_xcconfig"
