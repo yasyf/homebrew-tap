@@ -70,6 +70,22 @@ on:
           to the built .app; a non-zero exit fails the release. Empty skips it.
         type: string
         default: ""
+      go_version:
+        description: Exact MAJOR.MINOR.PATCH Go version required by an Xcode prebuild; empty disables Go setup
+        type: string
+        default: ""
+      go_cache_dependency_path:
+        description: Relative go.sum path used for setup-go caching
+        type: string
+        default: ""
+      prebuild_brew_packages:
+        description: Newline-separated Homebrew package names installed before project generation
+        type: string
+        default: ""
+      prebuild_script:
+        description: Optional caller-workspace-relative bash script run after dependency setup
+        type: string
+        default: ""
     secrets:
       MACOS_SIGN_P12:
         required: false
@@ -96,6 +112,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Validate caller build dependencies
+        uses: yasyf/homebrew-tap/.github/actions/prepare-app-build@fb4f471718f99cbfd627192e8c3f76c620e24be4
+        with:
+          go-version: ${{ inputs.go_version }}
+          go-cache-dependency-path: ${{ inputs.go_cache_dependency_path }}
+          brew-packages: ${{ inputs.prebuild_brew_packages }}
+          prebuild-script: ${{ inputs.prebuild_script }}
+          validate-only: "true"
 
       - name: Verify the tag is on main
         uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@v1
@@ -165,7 +190,6 @@ jobs:
             test -f "$CASK_TEMPLATE_PATH" \
               || { echo "::error::cask template '$CASK_TEMPLATE_PATH' not found"; exit 1; }
           fi
-
           if ! grep -q '[^[:space:]]' <<< "$CHANGED_PATHS"; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -316,6 +340,14 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ inputs.xcode_version }}
+
+      - name: Prepare caller build dependencies
+        uses: yasyf/homebrew-tap/.github/actions/prepare-app-build@fb4f471718f99cbfd627192e8c3f76c620e24be4
+        with:
+          go-version: ${{ inputs.go_version }}
+          go-cache-dependency-path: ${{ inputs.go_cache_dependency_path }}
+          brew-packages: ${{ inputs.prebuild_brew_packages }}
+          prebuild-script: ${{ inputs.prebuild_script }}
 
       - name: Generate the Xcode project and release version configuration
         id: project
