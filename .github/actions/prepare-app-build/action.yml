@@ -1,0 +1,56 @@
+name: Prepare application build
+description: Install an exact Go toolchain and caller-declared macOS build dependencies
+
+inputs:
+  go-version:
+    description: Exact MAJOR.MINOR.PATCH Go version; empty disables Go setup
+    required: false
+    default: ""
+  go-cache-dependency-path:
+    description: Relative go.sum path used for setup-go caching
+    required: false
+    default: ""
+  brew-packages:
+    description: Newline-separated Homebrew package names installed before the build
+    required: false
+    default: ""
+  prebuild-script:
+    description: Optional caller-workspace-relative bash script run after dependency setup
+    required: false
+    default: ""
+  validate-only:
+    description: Validate the complete contract without changing the runner
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Validate application build inputs
+      shell: bash
+      env:
+        GO_VERSION: ${{ inputs.go-version }}
+        GO_CACHE_DEPENDENCY_PATH: ${{ inputs.go-cache-dependency-path }}
+        BREW_PACKAGES: ${{ inputs.brew-packages }}
+        PREBUILD_SCRIPT: ${{ inputs.prebuild-script }}
+        VALIDATE_ONLY: ${{ inputs.validate-only }}
+      run: bash "$GITHUB_ACTION_PATH/prepare.sh" validate
+
+    - name: Set up exact Go toolchain
+      if: ${{ inputs.validate-only != 'true' && inputs.go-version != '' }}
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: ${{ inputs.go-cache-dependency-path != '' }}
+        cache-dependency-path: ${{ inputs.go-cache-dependency-path }}
+
+    - name: Install declared dependencies and run hook
+      if: ${{ inputs.validate-only != 'true' }}
+      shell: bash
+      env:
+        GO_VERSION: ${{ inputs.go-version }}
+        GO_CACHE_DEPENDENCY_PATH: ${{ inputs.go-cache-dependency-path }}
+        BREW_PACKAGES: ${{ inputs.brew-packages }}
+        PREBUILD_SCRIPT: ${{ inputs.prebuild-script }}
+        VALIDATE_ONLY: ${{ inputs.validate-only }}
+      run: bash "$GITHUB_ACTION_PATH/prepare.sh" run

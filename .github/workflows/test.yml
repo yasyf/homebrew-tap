@@ -40,6 +40,8 @@ jobs:
           set -euo pipefail
           checked=(
             .github/actions/import-developer-id/macos-codesign.sh
+            .github/actions/prepare-app-build/prepare.sh
+            .github/test-fixtures/prebuild-hook.sh
           )
           shellcheck "${checked[@]}"
           # Guard: every .sh under .github/ must be in the list above, so a new
@@ -84,6 +86,31 @@ jobs:
         with:
           go-version: stable
           cache: false
+
+      - name: prepare-app-build validates without mutating either runner
+        uses: ./.github/actions/prepare-app-build
+        with:
+          go-version: 1.26.5
+          brew-packages: macos-fuse-t/cask/fuse-t
+          prebuild-script: .github/test-fixtures/prebuild-hook.sh
+          validate-only: "true"
+
+      - name: prepare-app-build exact toolchain, package, and hook
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/prepare-app-build
+        with:
+          go-version: 1.26.5
+          brew-packages: pkg-config
+          prebuild-script: .github/test-fixtures/prebuild-hook.sh
+
+      - name: Assert the prepared application build contract
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          [ "$(go env GOVERSION)" = go1.26.5 ] \
+            || { echo "::error::prepare-app-build did not select exact Go 1.26.5"; exit 1; }
+          brew list --versions pkg-config >/dev/null
+          grep -Fxq prepared "$RUNNER_TEMP/prepare-app-build-hook"
 
       - name: Build a hello-world binary
         run: |
