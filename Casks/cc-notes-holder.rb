@@ -1,7 +1,7 @@
 # Fixed FuseKit holder for cc-notes. GENERATED per release from this template.
 cask "cc-notes-holder" do
-  version "0.37.2"
-  sha256 "bcea014e6778513be76428bc94dc13f6f212e25bf32ea838c7564abd9fcaafca"
+  version "0.38.0"
+  sha256 "1341808cd2fc5a61bb9af48f5498ccae5cfd2c070959093c38a1f909ef2a9865"
 
   url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes-holder-v#{version}-darwin.zip"
   name "cc-notes Holder"
