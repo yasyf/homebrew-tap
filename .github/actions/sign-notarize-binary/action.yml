@@ -82,7 +82,8 @@ runs:
         zip="dist/${NAME}-${TAG}-${PLATFORM}.zip"
         ditto -c -k "$BINARY" "$zip"
         sha="$(shasum -a 256 "$zip" | awk '{print $1}')"
-        shasum -a 256 "$zip" > "$zip.sha256"
+        # Basename manifest so `shasum -c` works beside the downloaded asset.
+        (cd dist && shasum -a 256 "${zip##*/}" > "${zip##*/}.sha256")
         (cd dist && shasum -a 256 -- *.zip > checksums.txt)
         echo "sha256=$sha" >> "$GITHUB_OUTPUT"
         echo "zip=$zip" >> "$GITHUB_OUTPUT"

@@ -302,7 +302,8 @@ jobs:
           # -j drops the path prefix so the bare executable sits at the zip root (the
           # cask `binary` stanza contract), matching the darwin ditto path.
           zip -j "$zip" "$BINARY"
-          shasum -a 256 "$zip" > "$zip.sha256"
+          # Basename manifest so `shasum -c` works beside the downloaded asset.
+          (cd dist && shasum -a 256 "${zip##*/}" > "${zip##*/}.sha256")
 
       - name: Upload the platform artifact
         uses: actions/upload-artifact@v7
