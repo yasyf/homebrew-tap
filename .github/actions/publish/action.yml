@@ -39,8 +39,20 @@ runs:
       run: |
         set -euo pipefail
         [ -d "$PUBLISH_DIR" ] || { echo "::error::publish dir '$PUBLISH_DIR' does not exist"; exit 1; }
+        if [ -e "$PUBLISH_DIR/Casks/fusekit-holder.rb" ] || \
+           grep -RIlE 'fusekit-holder|com\.yasyf\.fusekit-holder' \
+             "$PUBLISH_DIR/Casks" "$PUBLISH_DIR/Formula" 2>/dev/null | grep -q .; then
+          echo "::error::refusing to republish the retired standalone FuseKit holder"
+          exit 1
+        fi
         # Merge the staged Formula//Casks/ files into the tap working tree.
         cp -R "$PUBLISH_DIR"/. .tap-publish/
+        if [ -e .tap-publish/Casks/fusekit-holder.rb ] || \
+           grep -RIlE 'fusekit-holder|com\.yasyf\.fusekit-holder' \
+             .tap-publish/Casks .tap-publish/Formula 2>/dev/null | grep -q .; then
+          echo "::error::the retired standalone FuseKit holder exists in the merged tap"
+          exit 1
+        fi
         cd .tap-publish
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
