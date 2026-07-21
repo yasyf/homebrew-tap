@@ -11,6 +11,10 @@ on:
         description: built product name without the .app suffix
         type: string
         required: true
+      asset_name:
+        description: exact release-asset basename without the tag or extension
+        type: string
+        required: true
       project_dir:
         description: directory containing the XcodeGen project.yml
         type: string
@@ -43,22 +47,10 @@ on:
         description: Xcode version selected before XcodeGen and xcodebuild
         type: string
         default: "26"
-      notarize:
-        description: notarize and staple the application before packaging
-        type: boolean
-        default: true
       disable_library_validation:
         description: '"false" to forbid the entitlement; otherwise the exact audited dylib name that requires it'
         type: string
         default: "false"
-      cask_token:
-        description: Homebrew cask token and release-asset basename; empty disables cask publication
-        type: string
-        default: ""
-      cask_template_path:
-        description: cask template path; required exactly when cask_token is set
-        type: string
-        default: ""
       changed_paths:
         description: newline-separated shell globs; skip the app release when none changed since the previous v* tag
         type: string
@@ -86,19 +78,33 @@ on:
         description: Optional caller-workspace-relative bash script run after dependency setup
         type: string
         default: ""
+    outputs:
+      changed:
+        description: whether the application artifact was built for this tag
+        value: ${{ jobs.preflight.outputs.changed }}
+      artifact_name:
+        description: workflow artifact containing the verified zip and checksum
+        value: ${{ jobs.release.outputs.artifact_name }}
+      asset_filename:
+        description: exact verified GitHub release asset filename
+        value: ${{ jobs.release.outputs.asset_filename }}
+      asset_url:
+        description: exact verified GitHub release asset URL
+        value: ${{ jobs.release.outputs.asset_url }}
+      sha256:
+        description: SHA-256 of the verified GitHub release asset
+        value: ${{ jobs.release.outputs.sha256 }}
     secrets:
       MACOS_SIGN_P12:
-        required: false
+        required: true
       MACOS_SIGN_PASSWORD:
-        required: false
+        required: true
       MACOS_NOTARY_KEY:
-        required: false
+        required: true
       MACOS_NOTARY_KEY_ID:
-        required: false
+        required: true
       MACOS_NOTARY_ISSUER_ID:
-        required: false
-      HOMEBREW_TAP_TOKEN:
-        required: false
+        required: true
 
 jobs:
   preflight:
@@ -130,12 +136,11 @@ jobs:
         shell: bash
         env:
           APP_NAME: ${{ inputs.app_name }}
+          ASSET_NAME: ${{ inputs.asset_name }}
           PROJECT_DIR: ${{ inputs.project_dir }}
           BUNDLE_ID: ${{ inputs.bundle_id }}
           MARKETING_VERSION: ${{ inputs.marketing_version }}
           DISABLE_LIBRARY_VALIDATION: ${{ inputs.disable_library_validation }}
-          CASK_TOKEN: ${{ inputs.cask_token }}
-          CASK_TEMPLATE_PATH: ${{ inputs.cask_template_path }}
           CHANGED_PATHS: ${{ inputs.changed_paths }}
         run: |
           set -euo pipefail
@@ -163,6 +168,10 @@ jobs:
           case "$APP_NAME" in
             .|..|*[!A-Za-z0-9._+\ -]*) echo "::error::app_name '$APP_NAME' contains an unsafe character"; exit 1 ;;
           esac
+          if ! [[ "$ASSET_NAME" =~ ^[A-Za-z0-9]+([+._-][A-Za-z0-9]+)*$ ]]; then
+            echo "::error::asset_name '$ASSET_NAME' is invalid"
+            exit 1
+          fi
           [ -n "$PROJECT_DIR" ] || { echo "::error::project_dir is required"; exit 1; }
           case "$PROJECT_DIR" in
             /*|../*|*/../*|*/..) echo "::error::project_dir must stay inside the checkout"; exit 1 ;;
@@ -179,17 +188,6 @@ jobs:
               *[!A-Za-z0-9._+-]*) echo "::error::audited dylib reason '$DISABLE_LIBRARY_VALIDATION' is not a dylib name"; exit 1 ;;
             esac
           fi
-          if [ -n "$CASK_TOKEN" ] || [ -n "$CASK_TEMPLATE_PATH" ]; then
-            if [ -z "$CASK_TOKEN" ] || [ -z "$CASK_TEMPLATE_PATH" ]; then
-              echo "::error::cask_token and cask_template_path must be set together"; exit 1
-            fi
-            if ! [[ "$CASK_TOKEN" =~ ^[a-z0-9]+([+._-][a-z0-9]+)*$ ]]; then
-              echo "::error::cask_token '$CASK_TOKEN' is invalid"
-              exit 1
-            fi
-            test -f "$CASK_TEMPLATE_PATH" \
-              || { echo "::error::cask template '$CASK_TEMPLATE_PATH' not found"; exit 1; }
-          fi
           if ! grep -q '[^[:space:]]' <<< "$CHANGED_PATHS"; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -197,7 +195,7 @@ jobs:
 
           # Stable tags only as the diff base: a prerelease base absorbs the app
           # changes an rc carried, silently skipping them in the following stable
-          # release (and the cask, which publishes only on stable tags).
+          # release.
           base="$(git describe --tags --match 'v[0-9]*' --exclude '*-*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
           if [ -z "$base" ]; then
             echo "No earlier v* tag is reachable; the app is considered changed."
@@ -222,54 +220,6 @@ jobs:
             echo "No changed path matched since $base; skipping the app release."
           fi
 
-      - name: Guard cask registry name and version
-        if: ${{ steps.gate.outputs.changed == 'true' && steps.gate.outputs.stable == 'true' && inputs.cask_token != '' }}
-        shell: bash
-        env:
-          CASK_TOKEN: ${{ inputs.cask_token }}
-          VERSION: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          # shellcheck disable=SC2153 # VERSION is supplied through the step env.
-          version="${VERSION#v}"
-          tmp="$(mktemp -d)"
-
-          fetch() {
-            url="$1"
-            output="$2"
-            if ! code="$(curl --connect-timeout 15 --max-time 45 -sS -o "$output" -w '%{http_code}' "$url")"; then
-              echo "::error::registry guard could not reach $url; refusing to release blind"
-              exit 1
-            fi
-            case "$code" in
-              200|404) printf '%s' "$code" ;;
-              *) echo "::error::registry guard got HTTP $code from $url; refusing to release blind"; exit 1 ;;
-            esac
-          }
-
-          formula_url="https://raw.githubusercontent.com/yasyf/homebrew-tap/main/Formula/${CASK_TOKEN}.rb"
-          formula_code="$(fetch "$formula_url" "$tmp/formula.rb")"
-          if [ "$formula_code" = "200" ]; then
-            echo "::error::Formula/${CASK_TOKEN}.rb already exists; a same-named cask would make brew install ambiguous"
-            exit 1
-          fi
-
-          cask_url="https://raw.githubusercontent.com/yasyf/homebrew-tap/main/Casks/${CASK_TOKEN}.rb"
-          cask_code="$(fetch "$cask_url" "$tmp/cask.rb")"
-          if [ "$cask_code" = "404" ]; then
-            exit 0
-          fi
-          grep -Eq "^[[:space:]]*cask[[:space:]]+\"${CASK_TOKEN}\"[[:space:]]+do" "$tmp/cask.rb" \
-            || { echo "::error::the registered Casks/${CASK_TOKEN}.rb declares a different cask name"; exit 1; }
-          current="$(sed -n 's/^[[:space:]]*version[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' "$tmp/cask.rb" | sed -n '1p')"
-          [ -n "$current" ] \
-            || { echo "::error::could not parse the registered version for $CASK_TOKEN"; exit 1; }
-          first="$(printf '%s\n%s\n' "$current" "$version" | sort -V | sed -n '1p')"
-          if [ "$first" = "$version" ] && [ "$current" != "$version" ]; then
-            echo "::error::release version $version is older than registered cask version $current"
-            exit 1
-          fi
-
   release:
     needs: preflight
     if: ${{ needs.preflight.outputs.changed == 'true' }}
@@ -277,7 +227,10 @@ jobs:
     permissions:
       contents: write
     outputs:
-      sha256: ${{ steps.package.outputs.sha256 }}
+      artifact_name: ${{ steps.artifact.outputs.artifact_name }}
+      asset_filename: ${{ steps.artifact.outputs.asset_filename }}
+      asset_url: ${{ steps.artifact.outputs.asset_url }}
+      sha256: ${{ steps.artifact.outputs.sha256 }}
     defaults:
       run:
         shell: /bin/bash --noprofile --norc -e -o pipefail {0}
@@ -293,12 +246,8 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           PROFILE_NAMES: ${{ inputs.profile_names }}
           APP_GROUPS: ${{ inputs.app_groups }}
-          NOTARIZE: ${{ inputs.notarize }}
-          CASK_TOKEN: ${{ inputs.cask_token }}
-          STABLE: ${{ needs.preflight.outputs.stable }}
         run: |
           set -euo pipefail
           require_secret() {
@@ -314,27 +263,18 @@ jobs:
             exit 1
           fi
 
-          needs_api=false
-          if [ "$NOTARIZE" = "true" ] || grep -q '[^[:space:]]' <<< "$PROFILE_NAMES"; then
-            needs_api=true
-          fi
-          if [ "$needs_api" = "true" ]; then
-            require_secret "$MACOS_NOTARY_KEY" MACOS_NOTARY_KEY
-            require_secret "$MACOS_NOTARY_KEY_ID" MACOS_NOTARY_KEY_ID
-            require_secret "$MACOS_NOTARY_ISSUER_ID" MACOS_NOTARY_ISSUER_ID
-          fi
-          if [ "$STABLE" = "true" ] && [ -n "$CASK_TOKEN" ]; then
-            require_secret "$HOMEBREW_TAP_TOKEN" HOMEBREW_TAP_TOKEN
-          fi
+          require_secret "$MACOS_NOTARY_KEY" MACOS_NOTARY_KEY
+          require_secret "$MACOS_NOTARY_KEY_ID" MACOS_NOTARY_KEY_ID
+          require_secret "$MACOS_NOTARY_ISSUER_ID" MACOS_NOTARY_ISSUER_ID
 
       - name: Import Developer ID certificate
         uses: yasyf/homebrew-tap/.github/actions/import-developer-id@v1
         with:
           p12: ${{ secrets.MACOS_SIGN_P12 }}
           p12-password: ${{ secrets.MACOS_SIGN_PASSWORD }}
-          notary-key: ${{ (inputs.notarize || inputs.profile_names != '') && secrets.MACOS_NOTARY_KEY || '' }}
-          notary-key-id: ${{ (inputs.notarize || inputs.profile_names != '') && secrets.MACOS_NOTARY_KEY_ID || '' }}
-          notary-issuer-id: ${{ (inputs.notarize || inputs.profile_names != '') && secrets.MACOS_NOTARY_ISSUER_ID || '' }}
+          notary-key: ${{ secrets.MACOS_NOTARY_KEY }}
+          notary-key-id: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          notary-issuer-id: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
 
       - name: Select Xcode ${{ inputs.xcode_version }}
         uses: maxim-lobanov/setup-xcode@v1
@@ -355,7 +295,7 @@ jobs:
           PROJECT_DIR: ${{ inputs.project_dir }}
           APP_NAME: ${{ inputs.app_name }}
           MARKETING_VERSION: ${{ inputs.marketing_version }}
-          ASSET_NAME: ${{ inputs.cask_token || inputs.app_name }}
+          ASSET_NAME: ${{ inputs.asset_name }}
         run: |
           set -euo pipefail
           command -v xcodegen >/dev/null || brew install xcodegen
@@ -619,16 +559,6 @@ jobs:
             || { echo "::error::assert_script '$ASSERT_SCRIPT' not found in the caller checkout"; exit 1; }
           bash "$ASSERT_SCRIPT"
 
-      - name: Disable notarization after profile resolution
-        if: ${{ !inputs.notarize }}
-        run: |
-          set -euo pipefail
-          {
-            echo 'MACOS_NOTARY_KEY_FILE='
-            echo 'MACOS_NOTARY_KEY_ID='
-            echo 'MACOS_NOTARY_ISSUER='
-          } >> "$GITHUB_ENV"
-
       # sign-notarize-app owns notarytool's 20-minute upload timeout, three
       # transport retries, terminal non-Accepted verdict, JSON status check, log
       # dump, staple, and ditto packaging. After repeated upload failures, the
@@ -651,7 +581,6 @@ jobs:
           APP_GROUPS: ${{ inputs.app_groups }}
           PROFILE_NAMES: ${{ inputs.profile_names }}
           DISABLE_LIBRARY_VALIDATION: ${{ inputs.disable_library_validation }}
-          NOTARIZE: ${{ inputs.notarize }}
         run: |
           set -euo pipefail
           targets="$RUNNER_TEMP/release-app-final-targets"
@@ -805,9 +734,30 @@ jobs:
             grep -Fxq "$bundle" "$seen_bundles" \
               || { echo "::error::profile_names names unbuilt bundle '$bundle'"; exit 1; }
           done <<< "$PROFILE_NAMES"
-          if [ "$NOTARIZE" = "true" ]; then
-            xcrun stapler validate "$APP"
-          fi
+          xcrun stapler validate "$APP"
+
+      - name: Record the exact verified application artifact
+        id: artifact
+        env:
+          ASSET_NAME: ${{ inputs.asset_name }}
+          ZIP: ${{ steps.package.outputs.zip }}
+          PACKAGE_SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          expected="dist/${ASSET_NAME}-${GITHUB_REF_NAME}-darwin.zip"
+          [ "$ZIP" = "$expected" ] \
+            || { echo "::error::verified asset path '$ZIP' != '$expected'"; exit 1; }
+          shasum -a 256 -c "$ZIP.sha256"
+          actual_sha="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+          [ "$actual_sha" = "$PACKAGE_SHA256" ] \
+            || { echo "::error::verified asset SHA changed before publication"; exit 1; }
+          filename="$(basename "$ZIP")"
+          {
+            echo "artifact_name=release-app-${ASSET_NAME}"
+            echo "asset_filename=$filename"
+            echo "asset_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${filename}"
+            echo "sha256=$actual_sha"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Attach the verified application artifact to the GitHub release
         uses: softprops/action-gh-release@v3
@@ -818,62 +768,11 @@ jobs:
           generate_release_notes: false
           prerelease: ${{ needs.preflight.outputs.stable != 'true' }}
 
-      - name: Upload the verified application artifact for the cask job
+      - name: Upload the verified application artifact for the caller
         uses: actions/upload-artifact@v7
         with:
-          name: release-app-${{ steps.project.outputs.asset-name }}
+          name: ${{ steps.artifact.outputs.artifact_name }}
           path: |
             ${{ steps.package.outputs.zip }}
             ${{ steps.package.outputs.zip }}.sha256
           if-no-files-found: error
-
-  cask:
-    needs: [preflight, release]
-    if: ${{ needs.preflight.outputs.changed == 'true' && needs.preflight.outputs.stable == 'true' && inputs.cask_token != '' && inputs.cask_template_path != '' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-app-${{ inputs.cask_token }}
-          path: dist
-
-      - name: Verify the downloaded application artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          shasum -a 256 -c dist/*.sha256
-
-      - name: Require a full-application cask template
-        shell: bash
-        env:
-          CASK_TEMPLATE_PATH: ${{ inputs.cask_template_path }}
-        run: |
-          set -euo pipefail
-          grep -Eq '^[[:space:]]*app[[:space:]]+' "$CASK_TEMPLATE_PATH" \
-            || { echo "::error::cask template must install the full .app with an app stanza"; exit 1; }
-          if grep -Eq '^[[:space:]]*binary[[:space:]]+' "$CASK_TEMPLATE_PATH"; then
-            echo "::error::cask template must not install this application as a bare binary"
-            exit 1
-          fi
-
-      - name: Render the cask
-        uses: yasyf/homebrew-tap/.github/actions/render-formula@v1
-        with:
-          template: ${{ inputs.cask_template_path }}
-          output: Casks/${{ inputs.cask_token }}.rb
-          substitutions: |
-            __SHA_APP__=${{ needs.release.outputs.sha256 }}
-            __APP_NAME__=${{ inputs.app_name }}
-            __CASK_TOKEN__=${{ inputs.cask_token }}
-            __REPO__=${{ github.repository }}
-
-      - name: Publish the cask to the tap
-        uses: yasyf/homebrew-tap/.github/actions/publish@v1
-        with:
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          dir: tap-staging
-          message: "${{ inputs.cask_token }} ${{ github.ref_name }}"
