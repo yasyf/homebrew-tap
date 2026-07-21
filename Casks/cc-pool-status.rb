@@ -5,10 +5,10 @@
 # the postflight strips the download quarantine so first launch is silent. Install
 # with `ccp widget`, or by hand: brew install --cask yasyf/tap/cc-pool-status
 cask "cc-pool-status" do
-  version "0.61.2"
-  sha256 "1d89c169cb9ad448db30fd345d5a56af277cb0a3ee3fe55af4be92f1326d3d13" # app
+  version "0.61.3"
+  sha256 "ff654c0a8f6a99a7d55e2c0989e0d88787d665344fbaa2a535e0e6d8fe3ba075" # app
 
-  url "https://github.com/yasyf/cc-pool/releases/download/v0.61.2/cc-pool-status-v0.61.2-darwin.zip"
+  url "https://github.com/yasyf/cc-pool/releases/download/v0.61.3/cc-pool-status-v0.61.3-darwin.zip"
   name "cc-pool Status"
   desc "cc-pool status, File Provider, and fixed FuseKit holder app"
   homepage "https://github.com/yasyf/cc-pool"
