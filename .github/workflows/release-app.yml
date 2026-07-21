@@ -566,7 +566,7 @@ jobs:
       # of a completed non-Accepted submission.
       - name: Notarize, staple, and package the Xcode-signed application
         id: package
-        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-app@b6c1154d3d92dd3fb6e3c338bf8e38ac92656e89
+        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-app@a023f584d39d221bc6028261db4dfdf99a047dea
         with:
           app: ${{ steps.project.outputs.app }}
           name: ${{ steps.project.outputs.asset-name }}
@@ -747,7 +747,7 @@ jobs:
           expected="dist/${ASSET_NAME}-${GITHUB_REF_NAME}-darwin.zip"
           [ "$ZIP" = "$expected" ] \
             || { echo "::error::verified asset path '$ZIP' != '$expected'"; exit 1; }
-          shasum -a 256 -c "$ZIP.sha256"
+          (cd dist && shasum -a 256 -c "${ZIP##*/}.sha256")
           actual_sha="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
           [ "$actual_sha" = "$PACKAGE_SHA256" ] \
             || { echo "::error::verified asset SHA changed before publication"; exit 1; }
