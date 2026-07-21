@@ -129,7 +129,7 @@ jobs:
           validate-only: "true"
 
       - name: Verify the tag is on main
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@v1
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@b6c1154d3d92dd3fb6e3c338bf8e38ac92656e89
 
       - name: Validate release inputs and apply the change gate
         id: gate
@@ -268,7 +268,7 @@ jobs:
           require_secret "$MACOS_NOTARY_ISSUER_ID" MACOS_NOTARY_ISSUER_ID
 
       - name: Import Developer ID certificate
-        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@v1
+        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@b6c1154d3d92dd3fb6e3c338bf8e38ac92656e89
         with:
           p12: ${{ secrets.MACOS_SIGN_P12 }}
           p12-password: ${{ secrets.MACOS_SIGN_PASSWORD }}
@@ -566,7 +566,7 @@ jobs:
       # of a completed non-Accepted submission.
       - name: Notarize, staple, and package the Xcode-signed application
         id: package
-        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-app@v1
+        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-app@b6c1154d3d92dd3fb6e3c338bf8e38ac92656e89
         with:
           app: ${{ steps.project.outputs.app }}
           name: ${{ steps.project.outputs.asset-name }}
