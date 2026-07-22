@@ -1,21 +1,75 @@
 name: Verify tag on main
 description: >-
-  Fail unless the tagged commit (github.sha) is reachable from origin/main.
-  Versioned releases must come from main, so a tag cut off a side branch (or one
-  that lost a push race) is refused before any build runs. Requires a prior
+  Coherence gate for a tag-triggered release, run before any build or publish.
+  Fails when the tagged commit (github.sha) is not on main, when the remote tag has
+  been retargeted away from the checked-out commit, or — when plugin-manifest is set
+  — when the tag does not match the manifest's version. Requires a prior
   actions/checkout with fetch-depth: 0 so merge-base can reach the common ancestor.
+
+inputs:
+  plugin-manifest:
+    description: >-
+      Path to a Claude plugin manifest (plugin.json) whose top-level "version" must
+      equal the tag without its leading "v". Empty (default) disables the check, so
+      non-plugin consumers, and plugin repos whose manifest version is decoupled from
+      the release tag, are unaffected. Opt in only when the tag tracks the manifest
+      (e.g. plugin/.claude-plugin/plugin.json).
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
-    - name: Require the tagged commit to be on main
+    - name: Assert tag/commit/manifest coherence
       shell: bash
+      env:
+        PLUGIN_MANIFEST: ${{ inputs.plugin-manifest }}
       run: |
         set -euo pipefail
+        TAG="${GITHUB_REF_NAME}"
+        SHA="${GITHUB_SHA}"
+        MANIFEST="${PLUGIN_MANIFEST:-}"
+
+        # (1) The tagged commit must be reachable from main.
         git fetch --no-tags --quiet origin main
-        if git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
-          echo "✓ ${GITHUB_REF_NAME} (${GITHUB_SHA}) is on main."
+        if git merge-base --is-ancestor "$SHA" FETCH_HEAD; then
+          echo "✓ ${TAG} (${SHA}) is on main."
         else
-          echo "::error title=Tag not on main::${GITHUB_REF_NAME} points at ${GITHUB_SHA}, which is not on main. Only commits on main can be released — tag a commit that has landed on main (e.g. git tag vX.Y.Z origin/main), then push the tag."
+          echo "::error title=Tag not on main::${TAG} points at ${SHA}, which is not on main. Only commits on main can be released — tag a commit that has landed on main (e.g. git tag ${TAG} origin/main), then push the tag."
           exit 1
+        fi
+
+        # (2) The remote tag must still point at the checked-out commit (else retarget/race).
+        # The peeled (^{}) ref resolves an annotated tag; a lightweight tag falls back.
+        remote_target="$(git ls-remote origin "refs/tags/${TAG}^{}" | awk 'NR==1{print $1}')"
+        if [ -z "$remote_target" ]; then
+          remote_target="$(git ls-remote origin "refs/tags/${TAG}" | awk 'NR==1{print $1}')"
+        fi
+        if [ -n "$remote_target" ] && [ "$remote_target" != "$SHA" ]; then
+          echo "::error title=Tag retargeted::${TAG} points at ${remote_target} on origin but this run checked out ${SHA}. The tag moved after the release started. Do NOT delete and re-push ${TAG} — immutable-point-tag rulesets reject it and a moved tag breaks anyone who already fetched it. Cut a NEW patch tag at the intended commit instead."
+          exit 1
+        fi
+        echo "✓ ${TAG} still points at ${SHA} on origin."
+
+        # (3) Opt-in: when a plugin manifest path is passed, the tag must equal v<.version>.
+        if [ -n "$MANIFEST" ]; then
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error title=Manifest not found::plugin-manifest is set to '${MANIFEST}' but no such file exists at ${SHA}."
+            exit 1
+          fi
+          version="$(jq -er '.version' "$MANIFEST" 2>/dev/null || true)"
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            version="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$MANIFEST" 2>/dev/null || true)"
+          fi
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "::error title=Manifest version unreadable::could not read a top-level string \"version\" from ${MANIFEST}."
+            exit 1
+          fi
+          if [ "$TAG" != "v${version}" ]; then
+            echo "::error title=Tag/manifest mismatch::${TAG} does not match ${MANIFEST} version v${version} at ${SHA}. The tag is likely on a commit that predates the version bump, or reuses an already-released version. Do NOT delete and re-push ${TAG} — immutable-point-tag rulesets reject it. Set \"version\" to ${TAG#v} in a commit on main (or bump it) and cut a NEW tag matching the manifest version."
+            exit 1
+          fi
+          echo "✓ ${TAG} matches ${MANIFEST} version v${version}."
+        else
+          echo "· no plugin-manifest input; skipping tag/manifest coherence check."
         fi

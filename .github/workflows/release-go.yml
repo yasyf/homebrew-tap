@@ -65,6 +65,10 @@ on:
         description: formula/archive base name (required when render-formula is true)
         type: string
         default: ""
+      plugin-manifest:
+        description: 'plugin.json path whose "version" must equal the tag (opt-in tag/manifest coherence; empty disables). Only for plugin repos whose release tag tracks the manifest version.'
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -80,6 +84,8 @@ jobs:
       - name: Verify the tag is on main
         if: ${{ !inputs.auto-tag }}
         uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@v1
+        with:
+          plugin-manifest: ${{ inputs.plugin-manifest }}
 
       - name: Auto-tag (push-to-main release)
         if: ${{ inputs.auto-tag }}
