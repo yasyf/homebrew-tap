@@ -12,8 +12,8 @@
 # here on every tagged release — do not hand-edit; change the template at
 # .github/cask/cc-vigil.rb.tmpl in cc-vigil instead.
 cask "cc-vigil" do
-  version "0.4.0"
-  sha256 "6a7a68cfd70d6cc62ca749882b13cdd12b4d9dd2d14bfee96176d40c52d50d3e"
+  version "0.4.1"
+  sha256 "b95eaf37f1995c30159d567329198957a0f23b0f9e53d096dbc88dfedf8a765f"
 
   url "https://github.com/yasyf/cc-vigil/releases/download/v#{version}/cc-vigil-v#{version}-darwin.zip"
   name "cc-vigil"
@@ -21,10 +21,10 @@ cask "cc-vigil" do
   homepage "https://github.com/yasyf/cc-vigil"
 
   # Apple Silicon only: the bundled cc-transcript parser ships an arm64 slice
-  # alone. macOS 14+ matches the app's deployment target (a bare version symbol
+  # alone. macOS 15+ matches the app's deployment target (a bare version symbol
   # already means ">=" in Homebrew).
   depends_on arch: :arm64
-  depends_on macos: :sonoma
+  depends_on macos: :sequoia
 
   app "CCVigil.app"
 
