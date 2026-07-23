@@ -4,7 +4,7 @@ description: >-
   Developer ID codesign the bundle inside-out, notarize it (fail-loud on any
   non-Accepted status), staple the ticket, and ditto-zip the stapled bundle into
   dist/<name>-<ref>-darwin.zip. Outputs the zip's sha256 for the cask render, and
-  (by default) attaches the zip to the release. The .app BUILD stays per-repo (Go
+  (by default) attaches the zip to the requested release. The .app BUILD stays per-repo (Go
   lipo bundle, xcodebuild, Secure-Enclave helper); everything after is this action.
   Requires the import-developer-id action to have run first (reads MACOS_SIGN_IDENTITY
   + MACOS_NOTARY_* from the env). Pair with render-formula (Casks/<name>.rb, filling
@@ -15,7 +15,10 @@ inputs:
     description: path to the built .app bundle
     required: true
   name:
-    description: cask/asset base name (the zip is dist/<name>-<github.ref_name>-darwin.zip)
+    description: cask/asset base name
+    required: true
+  release-tag:
+    description: exact immutable release tag used for the asset name and attachment
     required: true
   sign:
     description: "codesign the bundle inside-out before notarizing (set false when xcodebuild already signed it, e.g. an app with a nested appex)"
@@ -34,7 +37,7 @@ inputs:
     required: false
     default: ""
   attach-to-release:
-    description: attach the zip + its .sha256 to the github.ref_name release
+    description: attach the zip + its .sha256 to the requested release
     required: false
     default: "true"
   release-notes:
@@ -58,12 +61,16 @@ runs:
       env:
         APP: ${{ inputs.app }}
         NAME: ${{ inputs.name }}
+        RELEASE_TAG: ${{ inputs.release-tag }}
         SIGN: ${{ inputs.sign }}
         ENTITLEMENTS: ${{ inputs.entitlements }}
         DISABLE_LIBRARY_VALIDATION: ${{ inputs.disable-library-validation }}
       run: |
         set -euo pipefail
         test -d "$APP" || { echo "::error::app bundle '$APP' not found"; exit 1; }
+        printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$' || {
+          echo "::error::invalid release tag '$RELEASE_TAG'"; exit 1;
+        }
         test -n "${MACOS_SIGN_IDENTITY:-}" || { echo "::error::MACOS_SIGN_IDENTITY unset — an .app cask must be signed (run import-developer-id first)"; exit 1; }
 
         ents=()
@@ -125,7 +132,7 @@ runs:
 
         # ditto -c -k preserves bundle metadata a plain zip drops; zip the STAPLED bundle.
         mkdir -p dist
-        zip="dist/${NAME}-${GITHUB_REF_NAME}-darwin.zip"
+        zip="dist/${NAME}-${RELEASE_TAG}-darwin.zip"
         ditto -c -k --keepParent "$APP" "$zip"
         sha="$(shasum -a 256 "$zip" | awk '{print $1}')"
         # Basename manifest so `shasum -c` works beside the downloaded asset.
@@ -138,8 +145,9 @@ runs:
       if: ${{ inputs.attach-to-release == 'true' }}
       uses: softprops/action-gh-release@v3
       with:
+        tag_name: ${{ inputs.release-tag }}
         files: |
           ${{ steps.pkg.outputs.zip }}
           ${{ steps.pkg.outputs.zip }}.sha256
         generate_release_notes: ${{ inputs.release-notes == 'true' }}
-        prerelease: ${{ contains(github.ref_name, '-') }}
+        prerelease: ${{ contains(inputs.release-tag, '-') }}
