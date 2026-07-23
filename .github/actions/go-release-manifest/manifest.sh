@@ -90,13 +90,16 @@ workspace="$(pwd -P)"
 while IFS= read -r path || [ -n "$path" ]; do
   name="$(basename "$path")"
   target="$verify/$name"
-  [ ! -e "$target" ] && [ ! -L "$target" ] \
-    || fail "release artifact basename collision for '$name'"
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    fail "release artifact basename collision for '$name'"
+  fi
   ln -s "$workspace/$path" "$target"
 done < "$manifest"
 
 while IFS=$'\t' read -r class type name path || [ -n "${class:-}" ]; do
-  [ "$class" = release ] && [ "$type" = Checksum ] || continue
+  if [ "$class" != release ] || [ "$type" != Checksum ]; then
+    continue
+  fi
   (
     cd "$verify"
     shasum -a 256 -c "$name"
