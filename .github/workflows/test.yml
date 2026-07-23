@@ -83,6 +83,53 @@ jobs:
             echo "::error::release-swift must use the exact-ID draft actions"
             exit 1
           fi
+          publish_pin=9ca67392d45d66b6ae01e262383c8f3138d56f5e
+          immutable_pin=c70d7e51bdb512db2a73d054e3a94afe0a61eedb
+          test "$(grep -Ec "actions/stage-draft-release@${stage_pin}$" "$swift")" = 1
+          test "$(grep -Ec "actions/publish-draft-release@${draft_pin}$" "$swift")" = 1
+          test "$(grep -Ec "actions/publish-draft-release@${immutable_pin}$" "$swift")" = 1
+          test "$(grep -Ec "actions/tap-delivery@${immutable_pin}$" "$swift")" = 2
+          test "$(grep -Ec "actions/publish@${publish_pin}$" "$swift")" = 1
+          test "$(grep -Fc 'uses: actions/upload-artifact@v7' "$swift")" = 1
+          test "$(grep -Fc 'uses: actions/download-artifact@v8' "$swift")" = 1
+          sidecar_ref="sidecar=\"\${ZIP}.sha256\""
+          manifest_ref="printf '%s\\n' \"\$ZIP\" \"\$sidecar\" dist/checksums.txt"
+          grep -Fq "$sidecar_ref" "$swift"
+          grep -Fq "$manifest_ref" "$swift"
+          swift_output_ref="release-id: \$"
+          swift_output_ref+="{{ steps.draft.outputs['release-id'] }}"
+          grep -Fq "$swift_output_ref" "$swift"
+          if grep -Fq "contains(steps.tag.outputs.tag, '-')" "$swift"; then
+            echo "::error::release-swift must parse SemVer prerelease state before build metadata"
+            exit 1
+          fi
+          swift_release_block="$(sed -n '/^  release:/,/^  publish-tap:/p' "$swift")"
+          swift_tap_block="$(sed -n '/^  publish-tap:/,$p' "$swift")"
+          grep -Fq 'name: Package immutable release and Homebrew delivery' <<< "$swift_release_block"
+          grep -Fq 'name: Upload immutable tap delivery' <<< "$swift_release_block"
+          grep -Fq 'needs: release' <<< "$swift_tap_block"
+          grep -Fq 'require-published: "true"' <<< "$swift_tap_block"
+          grep -Fq 'name: Reverify the exact immutable public release' <<< "$swift_tap_block"
+          grep -Fq 'name: Publish the preserved cask to the tap' <<< "$swift_tap_block"
+          if grep -Eq 'swift build|Build the universal binary|Sign, notarize, and package|Import Developer ID|MACOS_SIGN|MACOS_NOTARY|stage-draft-release' \
+            <<< "$swift_tap_block"; then
+            echo "::error::Swift tap-only retry path may not build, sign, notarize, or stage a release"
+            exit 1
+          fi
+          if grep -Fq 'name: Publish the preserved cask to the tap' <<< "$swift_release_block"; then
+            echo "::error::Swift release job may not mutate the tap"
+            exit 1
+          fi
+          line() { grep -Fn "$1" "$swift" | cut -d: -f1; }
+          swift_build="$(line 'name: Build the universal binary')"
+          swift_stage="$(line 'name: Stage and verify the complete draft release')"
+          swift_bundle="$(line 'name: Package immutable release and Homebrew delivery')"
+          swift_upload="$(line 'name: Upload immutable tap delivery')"
+          swift_publish="$(line 'name: Publish the verified release')"
+          test "$swift_build" -lt "$swift_stage"
+          test "$swift_stage" -lt "$swift_bundle"
+          test "$swift_bundle" -lt "$swift_upload"
+          test "$swift_upload" -lt "$swift_publish"
           if grep -RInE '^[[:space:]-]*uses:[[:space:]]+yasyf/homebrew-tap/.+@(v[0-9]+|[a-z]+-v[0-9]+|main)$' \
             .github/workflows/release-*.yml; then
             echo "::error::shared release workflows must pin homebrew-tap actions by exact commit"
@@ -108,8 +155,6 @@ jobs:
 
           go=.github/workflows/release-go.yml
           manifest_pin=bf445e75275fc12e276e06fc3b970a18f033b6d8
-          publish_pin=9ca67392d45d66b6ae01e262383c8f3138d56f5e
-          immutable_pin=c70d7e51bdb512db2a73d054e3a94afe0a61eedb
           test "$(grep -Ec "actions/go-release-manifest@${manifest_pin}$" "$go")" = 1
           test "$(grep -Ec "actions/stage-draft-release@${stage_pin}$" "$go")" = 1
           test "$(grep -Ec "actions/publish-draft-release@${draft_pin}$" "$go")" = 1
@@ -517,6 +562,50 @@ jobs:
             DELIVERY_TAP_DIR="$fixture/symlink-tap" \
             DELIVERY_MODE=pack bash "$script"; then
             echo "::error::symlinked tap input was accepted"
+            exit 1
+          fi
+
+      - name: Preserve the exact native Swift zip sidecar and checksum manifest
+        run: |
+          set -euo pipefail
+          script=.github/actions/tap-delivery/tap-delivery.sh
+          fixture="$RUNNER_TEMP/swift-delivery-fixture"
+          release="$fixture/release"
+          mkdir -p "$release" "$fixture/tap/Casks" "$fixture/original"
+          zip=cc-sudo-v0.6.1-darwin-universal.zip
+          printf 'signed-notarized-universal-mach-o\n' > "$release/$zip"
+          (
+            cd "$release"
+            shasum -a 256 "$zip" > "$zip.sha256"
+            shasum -a 256 -- *.zip > checksums.txt
+          )
+          printf 'cask "cc-sudo" do\nend\n' > "$fixture/tap/Casks/cc-sudo.rb"
+          cp "$release/$zip" "$release/$zip.sha256" "$release/checksums.txt" "$fixture/original/"
+          export DELIVERY_BUNDLE="$fixture/bundle"
+          export DELIVERY_RELEASE_DIR="$release"
+          export DELIVERY_TAP_DIR="$fixture/tap"
+          export DELIVERY_REPOSITORY=example/cc-sudo
+          export DELIVERY_SOURCE_SHA=0123456789abcdef0123456789abcdef01234567
+          export DELIVERY_TAG=v0.6.1
+          export DELIVERY_RELEASE_ID=301
+          export DELIVERY_RUN_ID=401
+
+          DELIVERY_MODE=pack bash "$script"
+          for asset in "$zip" "$zip.sha256" checksums.txt; do
+            cmp "$fixture/original/$asset" "$fixture/bundle/release-assets/$asset"
+          done
+          find "$fixture/bundle/release-assets" -mindepth 1 -maxdepth 1 -type f -print \
+            | sed "s|^.*/||" | LC_ALL=C sort > "$fixture/actual-assets"
+          printf '%s\n' checksums.txt "$zip" "$zip.sha256" | LC_ALL=C sort > "$fixture/expected-assets"
+          diff -u "$fixture/expected-assets" "$fixture/actual-assets"
+
+          printf 'rebuilt sidecar\n' > "$release/$zip.sha256"
+          DELIVERY_MODE=verify bash "$script"
+          cmp "$fixture/original/$zip.sha256" "$fixture/bundle/release-assets/$zip.sha256"
+
+          printf 'tampered sidecar\n' > "$fixture/bundle/release-assets/$zip.sha256"
+          if DELIVERY_MODE=verify bash "$script"; then
+            echo "::error::tampered Swift checksum sidecar was accepted"
             exit 1
           fi
 

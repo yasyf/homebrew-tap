@@ -1,8 +1,10 @@
 # The single reusable release workflow for every Swift CLI in the fleet. goreleaser
 # has no Swift builder, so this workflow owns the whole job by hand: verify-tag-on-main
 # (or auto-tag), Xcode selection, Developer ID import, a universal `swift build`,
-# native codesign + notarytool, caller-owned GitHub release publication, and a rendered binary cask pushed
-# to this tap. Each repo's release.yml collapses to a `uses:` line; all the logic
+# native codesign + notarytool, and caller-owned GitHub release publication. The
+# release job preserves the exact public bytes and rendered cask in one immutable
+# Actions artifact; a separate retryable tap job verifies that bundle and publishes
+# only its cask. Each repo's release.yml collapses to a `uses:` line; all the logic
 # lives here. Callers pin the exact immutable workflow owner commit.
 #
 # Zero-config contract: every input defaults. The SPM executable product must be
@@ -82,6 +84,11 @@ concurrency:
 jobs:
   release:
     runs-on: ${{ inputs.runner }}
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+      release-id: ${{ steps.draft.outputs['release-id'] }}
+      tap-artifact-name: ${{ steps.tap-artifact.outputs.name }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -109,9 +116,15 @@ jobs:
               *) echo "::error::release-swift.yml must run on a v* tag push (got $GITHUB_REF) — or set auto-tag: true"; exit 1 ;;
             esac
           fi
+          semver='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          [[ "$TAG" =~ $semver ]] || { echo "::error::invalid release tag '$TAG'"; exit 1; }
+          core="${TAG%%+*}"
+          prerelease=false
+          if [[ "$core" == *-* ]]; then prerelease=true; fi
           {
             echo "tag=$TAG"
             echo "version=${TAG#v}"
+            echo "prerelease=$prerelease"
           } >> "$GITHUB_OUTPUT"
 
       - name: Guard against a same-named formula in the tap
@@ -193,7 +206,7 @@ jobs:
       # would make the rc the live `brew install` version (goreleaser's
       # skip_upload: auto draws the same line for the Go casks).
       - name: Resolve cask metadata
-        if: ${{ !contains(steps.tag.outputs.tag, '-') }}
+        if: ${{ steps.tag.outputs.prerelease == 'false' }}
         id: meta
         env:
           DESCRIPTION: ${{ inputs.description }}
@@ -224,7 +237,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Materialize the cask template
-        if: ${{ !contains(steps.tag.outputs.tag, '-') }}
+        if: ${{ steps.tag.outputs.prerelease == 'false' }}
         env:
           CASK_TEMPLATE: ${{ inputs.cask-template }}
         run: |
@@ -257,7 +270,7 @@ jobs:
           EOF
 
       - name: Render the cask
-        if: ${{ !contains(steps.tag.outputs.tag, '-') }}
+        if: ${{ steps.tag.outputs.prerelease == 'false' }}
         uses: yasyf/homebrew-tap/.github/actions/render-formula@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           template: ${{ runner.temp }}/cask.rb.tmpl
@@ -291,7 +304,36 @@ jobs:
           tag: ${{ steps.tag.outputs.tag }}
           manifest: ${{ runner.temp }}/swift-release-assets
           title: ${{ steps.tag.outputs.tag }}
-          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+
+      - name: Package immutable release and Homebrew delivery
+        if: ${{ steps.tag.outputs.prerelease == 'false' }}
+        uses: yasyf/homebrew-tap/.github/actions/tap-delivery@c70d7e51bdb512db2a73d054e3a94afe0a61eedb
+        with:
+          mode: pack
+          bundle: ${{ runner.temp }}/tap-delivery
+          release-dir: ${{ steps.draft.outputs['download-dir'] }}
+          tap-dir: tap-staging
+          repository: ${{ github.repository }}
+          source-sha: ${{ github.sha }}
+          tag: ${{ steps.tag.outputs.tag }}
+          release-id: ${{ steps.draft.outputs['release-id'] }}
+          run-id: ${{ github.run_id }}
+
+      - name: Resolve immutable delivery artifact name
+        if: ${{ steps.tag.outputs.prerelease == 'false' }}
+        id: tap-artifact
+        run: echo "name=tap-delivery-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload immutable tap delivery
+        if: ${{ steps.tag.outputs.prerelease == 'false' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.tap-artifact.outputs.name }}
+          path: ${{ runner.temp }}/tap-delivery
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 0
 
       - name: Publish the verified release
         uses: yasyf/homebrew-tap/.github/actions/publish-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5
@@ -300,13 +342,55 @@ jobs:
           release-id: ${{ steps.draft.outputs['release-id'] }}
           tag: ${{ steps.tag.outputs.tag }}
           manifest: ${{ runner.temp }}/swift-release-assets
-          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
-          make-latest: ${{ !contains(steps.tag.outputs.tag, '-') }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          make-latest: ${{ steps.tag.outputs.prerelease == 'false' }}
 
-      - name: Publish the cask to the tap
-        if: ${{ !contains(steps.tag.outputs.tag, '-') }}
-        uses: yasyf/homebrew-tap/.github/actions/publish@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
+  publish-tap:
+    needs: release
+    if: ${{ needs.release.outputs.prerelease == 'false' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download immutable tap delivery
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.release.outputs.tap-artifact-name }}
+          path: ${{ runner.temp }}/tap-delivery
+
+      - name: Verify immutable delivery provenance and bytes
+        uses: yasyf/homebrew-tap/.github/actions/tap-delivery@c70d7e51bdb512db2a73d054e3a94afe0a61eedb
+        with:
+          mode: verify
+          bundle: ${{ runner.temp }}/tap-delivery
+          repository: ${{ github.repository }}
+          source-sha: ${{ github.sha }}
+          tag: ${{ needs.release.outputs.tag }}
+          release-id: ${{ needs.release.outputs.release-id }}
+          run-id: ${{ github.run_id }}
+
+      - name: Resolve exact preserved release manifest
+        run: |
+          set -euo pipefail
+          find "$RUNNER_TEMP/tap-delivery/release-assets" -mindepth 1 -maxdepth 1 -type f -print \
+            | LC_ALL=C sort > "$RUNNER_TEMP/tap-release-assets"
+          test -s "$RUNNER_TEMP/tap-release-assets" || {
+            echo "::error::immutable release manifest is empty"
+            exit 1
+          }
+
+      - name: Reverify the exact immutable public release
+        uses: yasyf/homebrew-tap/.github/actions/publish-draft-release@c70d7e51bdb512db2a73d054e3a94afe0a61eedb
+        with:
+          token: ${{ github.token }}
+          release-id: ${{ needs.release.outputs.release-id }}
+          tag: ${{ needs.release.outputs.tag }}
+          manifest: ${{ runner.temp }}/tap-release-assets
+          prerelease: "false"
+          make-latest: "true"
+          require-published: "true"
+
+      - name: Publish the preserved cask to the tap
+        uses: yasyf/homebrew-tap/.github/actions/publish@9ca67392d45d66b6ae01e262383c8f3138d56f5e
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          dir: tap-staging
-          message: "${{ inputs.product }} ${{ steps.tag.outputs.tag }}"
+          dir: ${{ runner.temp }}/tap-delivery/tap
+          message: "${{ inputs.product }} ${{ needs.release.outputs.tag }}"
