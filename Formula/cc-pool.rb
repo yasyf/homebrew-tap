@@ -12,8 +12,8 @@
 class CcPool < Formula
   desc "Predictive multi-account load-balancing for Claude Code"
   homepage "https://github.com/yasyf/cc-pool"
-  url "https://github.com/yasyf/cc-pool/releases/download/v0.62.0/cc-pool-v0.62.0-darwin-universal.tar.gz"
-  sha256 "e5ec369e04ffb7273b23c540516ba7814f55a2a5c2290567a7c1df139530b9be" # pure
+  url "https://github.com/yasyf/cc-pool/releases/download/v0.63.2/cc-pool-v0.63.2-darwin-universal.tar.gz"
+  sha256 "b554e012213b9b4d43eedfc5483bf485fb6f859cb66cbf02099558fc0e824784" # pure
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -54,13 +54,12 @@ class CcPool < Formula
         ccp             # walks you through pooling your subscriptions
         ccp run         # launch claude on the emptiest account
 
-      The daemon requires the fixed signed CCPoolStatus/File Provider app.
-      Install the complete stack with:
-        brew install --cask yasyf/tap/cc-pool-status
-        ccp service install
+      `ccp init`, `ccp widget`, and `ccp service install` reconcile the exact
+      signed CCPoolStatus app from the same release into:
+        ~/Applications/CCPoolStatus.app
 
       daemonkit owns the user LaunchAgent. Homebrew does not install or control
-      a second daemon service, and a formula-only install cannot start one.
+      a second daemon service.
 
       Plain `claude` on ~/.claude keeps working untouched.
 
