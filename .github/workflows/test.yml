@@ -46,6 +46,82 @@ jobs:
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
 
+  public-go-tap-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require an exact public-byte continuation
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/publish-go-tap.yml
+          action=.github/actions/public-go-tap-delivery
+          publish_pin=9ca67392d45d66b6ae01e262383c8f3138d56f5e
+
+          test "$(grep -Ec '^  workflow_dispatch:$' "$workflow")" = 1
+          if sed -n '/^on:$/,/^permissions:$/p' "$workflow" \
+            | grep -Eq '^  (push|pull_request|schedule|workflow_call|repository_dispatch):'; then
+            echo "::error::the public-release continuation must be workflow_dispatch-only"
+            exit 1
+          fi
+          test "$(grep -Ec '^[[:space:]]+contents: write$' "$workflow")" = 1
+          test "$(grep -Ec '^[[:space:]]+contents: read$' "$workflow")" = 0
+          test "$(grep -Ec '^    runs-on: macos-latest$' "$workflow")" = 1
+          test "$(grep -Ec '^[[:space:]]+(-[[:space:]]+)?uses:' "$workflow")" = 3
+          test "$(grep -Fc 'uses: actions/checkout@v7' "$workflow")" = 1
+          test "$(grep -Ec "actions/publish@${publish_pin}$" "$workflow")" = 1
+          test "$(grep -Fc 'uses: ./.github/actions/public-go-tap-delivery' "$workflow")" = 1
+
+          staging_ref='dir: $'
+          staging_ref+="{{ steps.delivery.outputs.staging-dir }}"
+          grep -Fq "$staging_ref" "$workflow"
+          token_ref='token: $'
+          token_ref+="{{ github.token }}"
+          test "$(grep -Fc "$token_ref" "$workflow")" = 1
+          api_token_ref='GH_TOKEN: $'
+          api_token_ref+="{{ github.token }}"
+          test "$(grep -Fc "$api_token_ref" "$workflow")" = 1
+          if grep -Fq 'secrets.' "$workflow"; then
+            echo "::error::the same-repo continuation must use only its scoped GITHUB_TOKEN"
+            exit 1
+          fi
+
+          for input in \
+            source-repository release-id tag tagged-source-sha delivery-mode \
+            source-path delivery-name asset-sha256 template-asset-tokens; do
+            grep -Eq "^      ${input}:$" "$workflow"
+          done
+          grep -Fq '          - formula-template' "$workflow"
+          grep -Fq '          - goreleaser-cask' "$workflow"
+
+          if grep -Eq '^[[:space:]]+run:|MACOS_(SIGN|NOTARY)' "$workflow"; then
+            echo "::error::the continuation workflow may not rebuild, resign, or stage a release"
+            exit 1
+          fi
+          if grep -RInE 'notarytool|codesign.*(--sign([=[:space:]]|$)|[[:space:]]-s([[:space:]]|$))|gh release' \
+            "$action/action.yml" "$action/prepare.py" "$action/verify_darwin_signatures.py"; then
+            echo "::error::public-byte verification may not build, sign, notarize, or mutate a release"
+            exit 1
+          fi
+          if grep -Eq '"(POST|PATCH|DELETE)"' "$action/prepare.py"; then
+            echo "::error::the public-release API client must remain GET-only"
+            exit 1
+          fi
+
+      - name: Exercise public release verification and rendering
+        run: |
+          set -euo pipefail
+          action=.github/actions/public-go-tap-delivery
+          python3 -m py_compile \
+            "$action/prepare.py" \
+            "$action/verify_darwin_signatures.py" \
+            "$action/test.py"
+          python3 "$action/test.py"
+          ruby -c "$action/render_goreleaser_cask.rb"
+          npx --yes pyright@1.1.407 \
+            "$action/prepare.py" \
+            "$action/verify_darwin_signatures.py" \
+            "$action/test.py"
+
   release-app-contract:
     runs-on: ubuntu-latest
     steps:
