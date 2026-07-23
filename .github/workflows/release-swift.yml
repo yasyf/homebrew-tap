@@ -3,8 +3,7 @@
 # (or auto-tag), Xcode selection, Developer ID import, a universal `swift build`,
 # native codesign + notarytool, caller-owned GitHub release publication, and a rendered binary cask pushed
 # to this tap. Each repo's release.yml collapses to a `uses:` line; all the logic
-# lives here, pinned `@swift-v1` (release-swift.yml does not exist at `v1` — Swift
-# callers must pin the swift family).
+# lives here. Callers pin the exact immutable workflow owner commit.
 #
 # Zero-config contract: every input defaults. The SPM executable product must be
 # named exactly the repo name (repo-bootstrap's swift layer scaffolds it that way);
@@ -12,7 +11,7 @@
 #
 # Callers MUST use `secrets: inherit` (forwards HOMEBREW_TAP_TOKEN + the five MACOS_*).
 # Minimal caller:
-#   jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-swift.yml@swift-v1, secrets: inherit } }
+#   jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-swift.yml@83ee384b1d4fe25a8e4aa7258bb76d55e1593735, secrets: inherit } }
 #
 # Signing is always the native codesign + notarytool path (the job already runs on a
 # macOS runner, so quill buys nothing). Missing Developer ID credentials fail before

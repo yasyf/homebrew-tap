@@ -79,7 +79,7 @@ The caller zips it (`ditto -c -k --keepParent`) and pairs it with `render-formul
 ## Usage
 
 ```yaml
-- uses: yasyf/homebrew-tap/.github/actions/import-developer-id@v1
+- uses: yasyf/homebrew-tap/.github/actions/import-developer-id@4afbb78f9e1814af04f9686ccf101ecafd5aa295
   with:
     p12: ${{ secrets.MACOS_SIGN_P12 }}
     p12-password: ${{ secrets.MACOS_SIGN_PASSWORD }}
@@ -88,7 +88,7 @@ The caller zips it (`ditto -c -k --keepParent`) and pairs it with `render-formul
     notary-issuer-id: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
 
 - id: wrap
-  uses: yasyf/homebrew-tap/.github/actions/wrap-daemon-bundle@v1
+  uses: yasyf/homebrew-tap/.github/actions/wrap-daemon-bundle@4afbb78f9e1814af04f9686ccf101ecafd5aa295
   with:
     binary: dist/cc-pool-daemon-universal
     bundle-id: com.yasyf.cc-pool.daemon

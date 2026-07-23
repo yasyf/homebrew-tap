@@ -1,7 +1,7 @@
 # CI for the shared release infrastructure itself. Every fleet repo pins this
-# repo's actions/workflows @v1, so a regression here breaks every release at
+# repo's actions/workflows by exact immutable commits, so a regression here breaks every release at
 # once — lint all of it and exercise the fail-closed missing-identity paths on
-# both runner OSes before a tag move ships a change to consumers.
+# both runner OSes before consumers repin to a new green owner commit.
 
 name: Test
 
@@ -537,7 +537,7 @@ jobs:
       # Known coverage gap: sign-notarize-binary's release-attach step (softprops)
       # and release-swift.yml's auto-tag branch can't run here (both need a real
       # tag + release). They're exercised only by consumer releases — touch them
-      # with extra care and validate on a scratch repo before repointing swift-v1.
+      # with extra care and validate on a scratch repo before repinning Swift callers.
 
       - name: Scaffold a hello Swift package
         if: runner.os == 'macOS'
