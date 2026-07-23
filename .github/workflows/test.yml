@@ -74,7 +74,7 @@ jobs:
           swift=.github/workflows/release-swift.yml
           grep -Fq 'actions/stage-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5' "$swift"
           grep -Fq 'actions/publish-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5' "$swift"
-          output_ref='release-id: $'
+          output_ref="release-id: \$"
           output_ref+="{{ steps.draft.outputs['release-id'] }}"
           grep -Fq "$output_ref" "$swift"
           if grep -Eq '/releases/tags/|gh release (view|upload|download|edit)' "$swift"; then
@@ -103,7 +103,11 @@ jobs:
           test "$(grep -Ec "actions/stage-draft-release@${draft_pin}$" "$go")" = 1
           test "$(grep -Ec "actions/publish-draft-release@${draft_pin}$" "$go")" = 1
           grep -Fq 'goreleaser release --clean --skip=publish' "$go"
-          go_output_ref='release-id: $'
+          grep -Fq "auto-tag release commit \$SHA is not an ancestor of \$DEFAULT_BRANCH" "$go"
+          version_ref="version: \$"
+          version_ref+='{{ steps.tag.outputs.version }}'
+          grep -Fq "$version_ref" "$go"
+          go_output_ref="release-id: \$"
           go_output_ref+="{{ steps.draft.outputs['release-id'] }}"
           grep -Fq "$go_output_ref" "$go"
           if grep -F 'goreleaser release ' "$go" | grep -Fv -- '--skip=publish'; then
@@ -112,6 +116,10 @@ jobs:
           fi
           if grep -Eq '/releases/tags/|gh release (view|upload|download|edit)|softprops/action-gh-release' "$go"; then
             echo "::error::release-go must use the exact-ID draft actions"
+            exit 1
+          fi
+          if grep -Fq "contains(steps.tag.outputs.tag, '-')" "$go"; then
+            echo "::error::release-go must parse SemVer prerelease state before build metadata"
             exit 1
           fi
           build_block="$(sed -n '/name: Build release artifacts without publishing/,/name: Render the formula/p' "$go")"
@@ -189,18 +197,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          install-only: true
       - name: Create representative GoReleaser artifacts
         run: |
           set -euo pipefail
           mkdir -p dist/bin dist/homebrew/Casks
           printf 'archive\n' > dist/tool_darwin_arm64.tar.gz
           printf 'binary\n' > dist/bin/tool
+          printf 'raw binary\n' > dist/tool_raw
           printf 'cask\n' > dist/homebrew/Casks/tool.rb
-          sha256sum dist/tool_darwin_arm64.tar.gz > dist/checksums.txt
+          sha256sum dist/tool_darwin_arm64.tar.gz dist/tool_raw > dist/checksums.txt
           printf '{}\n' > dist/metadata.json
           jq -n '[
             {type:"Archive", name:"tool_darwin_arm64.tar.gz", path:"dist/tool_darwin_arm64.tar.gz"},
             {type:"Checksum", name:"checksums.txt", path:"dist/checksums.txt"},
+            {type:"Binary", name:"tool_raw", path:"dist/tool_raw"},
             {type:"Binary", name:"tool", path:"dist/bin/tool"},
             {type:"Homebrew Cask", name:"tool.rb", path:"dist/homebrew/Casks/tool.rb"},
             {type:"Metadata", name:"metadata.json", path:"dist/metadata.json"}
@@ -212,7 +227,8 @@ jobs:
       - name: Verify release and local artifact classes remain separate
         run: |
           set -euo pipefail
-          printf '%s\n' dist/checksums.txt dist/tool_darwin_arm64.tar.gz > "$RUNNER_TEMP/expected-assets"
+          printf '%s\n' dist/checksums.txt dist/tool_darwin_arm64.tar.gz dist/tool_raw \
+            > "$RUNNER_TEMP/expected-assets"
           diff -u "$RUNNER_TEMP/expected-assets" "$RUNNER_TEMP/release-assets"
           jq '.[0].type = "Docker Image"' dist/artifacts.json > "$RUNNER_TEMP/unsupported.json"
           if bash .github/actions/go-release-manifest/manifest.sh \
@@ -220,6 +236,57 @@ jobs:
             echo "::error::unsupported artifact class was accepted"
             exit 1
           fi
+      - name: Prove build-only GoReleaser still renders Homebrew
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/goreleaser-build-only"
+          mkdir -p "$fixture"
+          cd "$fixture"
+          printf 'module example.invalid/fixture\n\ngo 1.26\n' > go.mod
+          printf 'package main\nfunc main() {}\n' > main.go
+          printf 'fixture\n' > README.md
+          git init -q
+          git config user.name test
+          git config user.email test@example.invalid
+          git remote add origin https://github.com/example/fixture.git
+          git add .
+          git commit -qm initial
+          cat > .goreleaser.yaml <<'EOF'
+          version: 2
+          project_name: fixture
+          builds:
+            - id: fixture
+              main: .
+              binary: fixture
+              env: [CGO_ENABLED=0]
+              goos: [darwin]
+              goarch: [arm64]
+          archives:
+            - id: archive
+              ids: [fixture]
+              formats: [tar.gz]
+          checksum:
+            name_template: checksums.txt
+          homebrew_casks:
+            - name: fixture
+              ids: [archive]
+              repository:
+                owner: example
+                name: homebrew-tap
+                token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+          release:
+            github:
+              owner: example
+              name: fixture
+          EOF
+          git add .goreleaser.yaml
+          git commit -qm config
+          git tag v1.2.3
+          goreleaser release --clean --skip=publish
+          test -f dist/homebrew/Casks/fixture.rb
+          bash "$GITHUB_WORKSPACE/.github/actions/go-release-manifest/manifest.sh" \
+            dist/artifacts.json "$RUNNER_TEMP/real-release-assets"
+          test "$(wc -l < "$RUNNER_TEMP/real-release-assets" | tr -d ' ')" = 2
 
   inline-shell:
     runs-on: ubuntu-latest

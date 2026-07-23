@@ -93,8 +93,11 @@ jobs:
       - name: Auto-tag (push-to-main release)
         id: auto-tag
         if: ${{ inputs.auto-tag }}
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
+          test -n "$DEFAULT_BRANCH" || { echo "::error::repository default branch is unknown"; exit 1; }
           # Reruns of a failed release keep the same run_number, so this must be
           # idempotent: a tag already at THIS commit is reused (a release that died
           # after the tag — e.g. goreleaser on a missing secret — stays rerunnable),
@@ -102,6 +105,12 @@ jobs:
           # both the fetched clone and origin, and never retag or force.
           TAG="v0.1.${{ github.run_number }}"
           SHA="$(git rev-parse HEAD)"
+          git fetch --no-tags origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          default_ref="refs/remotes/origin/${DEFAULT_BRANCH}"
+          git merge-base --is-ancestor "$SHA" "$default_ref" || {
+            echo "::error::auto-tag release commit $SHA is not an ancestor of $DEFAULT_BRANCH"
+            exit 1
+          }
           existing=""
           if local_sha="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}")"; then
             existing="$local_sha"
@@ -142,8 +151,16 @@ jobs:
           else
             tag="$PUSH_TAG"
           fi
-          [[ "$tag" == v* ]] || { echo "::error::invalid release tag '$tag'"; exit 1; }
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          semver='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          [[ "$tag" =~ $semver ]] || { echo "::error::invalid release tag '$tag'"; exit 1; }
+          core="${tag%%+*}"
+          prerelease=false
+          if [[ "$core" == *-* ]]; then prerelease=true; fi
+          {
+            echo "tag=$tag"
+            echo "version=${tag#v}"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
 
       - if: ${{ inputs.setup-bun }}
         uses: oven-sh/setup-bun@v2
@@ -241,15 +258,16 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
 
       - name: Render the formula
-        if: ${{ inputs.render-formula && !contains(steps.tag.outputs.tag, '-') }}
+        if: ${{ inputs.render-formula && steps.tag.outputs.prerelease == 'false' }}
         uses: yasyf/homebrew-tap/.github/actions/render-formula@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           template: ${{ inputs.formula-template }}
           name: ${{ inputs.formula-name }}
           output: Formula/${{ inputs.formula-name }}.rb
+          version: ${{ steps.tag.outputs.version }}
 
       - name: Verify Homebrew staging
-        if: ${{ !contains(steps.tag.outputs.tag, '-') }}
+        if: ${{ steps.tag.outputs.prerelease == 'false' }}
         env:
           RENDER_FORMULA: ${{ inputs.render-formula }}
         run: |
@@ -291,7 +309,7 @@ jobs:
           tag: ${{ steps.tag.outputs.tag }}
           manifest: ${{ runner.temp }}/go-release-assets
           title: ${{ steps.tag.outputs.tag }}
-          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
 
       - name: Publish the verified release
         uses: yasyf/homebrew-tap/.github/actions/publish-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5
@@ -300,11 +318,11 @@ jobs:
           release-id: ${{ steps.draft.outputs['release-id'] }}
           tag: ${{ steps.tag.outputs.tag }}
           manifest: ${{ runner.temp }}/go-release-assets
-          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
-          make-latest: ${{ !contains(steps.tag.outputs.tag, '-') }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          make-latest: ${{ steps.tag.outputs.prerelease == 'false' }}
 
       - name: Publish the generated Homebrew delivery
-        if: ${{ !inputs.render-formula && !contains(steps.tag.outputs.tag, '-') }}
+        if: ${{ !inputs.render-formula && steps.tag.outputs.prerelease == 'false' }}
         uses: yasyf/homebrew-tap/.github/actions/publish@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -312,7 +330,7 @@ jobs:
           message: "${{ github.event.repository.name }} ${{ steps.tag.outputs.tag }}"
 
       - name: Publish the rendered formula to the tap
-        if: ${{ inputs.render-formula && !contains(steps.tag.outputs.tag, '-') }}
+        if: ${{ inputs.render-formula && steps.tag.outputs.prerelease == 'false' }}
         uses: yasyf/homebrew-tap/.github/actions/publish@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
