@@ -5,19 +5,17 @@ description: >-
   Connect notary key, and export standardized signing env for codesign/notarytool.
   Also drops the canonical macos-codesign.sh on the runner and exports
   $MACOS_CODESIGN_SCRIPT so a goreleaser build post-hook (or a hand build) can sign
-  each darwin binary with one shared script. No-op when the p12 input is empty, so
-  a repo without Apple credentials still builds (unsigned). macOS runners only.
+  each darwin binary with one shared script. Missing signing credentials fail before
+  any release artifact can be built or published. macOS runners only.
   This is the single home of the keychain dance — never copy it into a repo again.
 
 inputs:
   p12:
     description: base64-encoded full-chain Developer ID Application .p12 (leaf + Developer ID intermediate + Apple Root CA)
-    required: false
-    default: ""
+    required: true
   p12-password:
     description: password for the .p12
-    required: false
-    default: ""
+    required: true
   notary-key:
     description: base64-encoded App Store Connect API .p8 (enables notarization)
     required: false
@@ -33,13 +31,13 @@ inputs:
 
 outputs:
   signed:
-    description: "'true' when the signing identity was imported and the env was set up, else 'false'"
+    description: "'true' after the signing identity is imported and the env is set up"
     value: ${{ steps.import.outputs.signed }}
   identity:
-    description: 'the resolved "Developer ID Application: NAME (TEAMID)" identity (empty when unsigned)'
+    description: 'the resolved "Developer ID Application: NAME (TEAMID)" identity'
     value: ${{ steps.import.outputs.identity }}
   team-id:
-    description: the Apple Team ID derived from the identity (empty when unsigned)
+    description: the Apple Team ID derived from the identity
     value: ${{ steps.import.outputs.team-id }}
 
 runs:
@@ -57,23 +55,17 @@ runs:
       run: |
         set -euo pipefail
 
-        # Always make the canonical codesign script available + exported, so a goreleaser
-        # post-hook templated as {{ .Env.MACOS_CODESIGN_SCRIPT }} resolves even on an
-        # unsigned build (the script itself no-ops without MACOS_SIGN_IDENTITY).
-        install -m 0755 "$ACTION_PATH/macos-codesign.sh" "$RUNNER_TEMP/macos-codesign.sh"
-        echo "MACOS_CODESIGN_SCRIPT=$RUNNER_TEMP/macos-codesign.sh" >> "$GITHUB_ENV"
-
-        if [ -z "${MACOS_SIGN_P12}" ]; then
-          echo "import-developer-id: p12 empty — leaving the build unsigned."
-          echo "signed=false" >> "$GITHUB_OUTPUT"
-          echo "identity=" >> "$GITHUB_OUTPUT"
-          echo "team-id=" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
+        test -n "${MACOS_SIGN_P12}" || { echo "::error::MACOS_SIGN_P12 is required; refusing an unsigned release"; exit 1; }
+        test -n "${MACOS_SIGN_PASSWORD}" || { echo "::error::MACOS_SIGN_PASSWORD is required; refusing an unsigned release"; exit 1; }
         if [ "${RUNNER_OS}" != "macOS" ]; then
           echo "::error title=Wrong runner::import-developer-id needs a macOS runner (codesign/notarytool are macOS-only). Use the quill signing path on ubuntu instead, or set runs-on: macos-*."
           exit 1
         fi
+
+        # Export the canonical script only after the release credentials pass the
+        # fail-closed preflight.
+        install -m 0755 "$ACTION_PATH/macos-codesign.sh" "$RUNNER_TEMP/macos-codesign.sh"
+        echo "MACOS_CODESIGN_SCRIPT=$RUNNER_TEMP/macos-codesign.sh" >> "$GITHUB_ENV"
 
         # Import into a throwaway keychain (NEVER do this on a dev Mac — it locks the
         # login keychain). The keychain is added to the user search list so codesign

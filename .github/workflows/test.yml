@@ -1,7 +1,7 @@
 # CI for the shared release infrastructure itself. Every fleet repo pins this
 # repo's actions/workflows @v1, so a regression here breaks every release at
-# once — lint all of it and exercise the safe (unsigned) action paths on both
-# runner OSes before a tag move ships a change to consumers.
+# once — lint all of it and exercise the fail-closed missing-identity paths on
+# both runner OSes before a tag move ships a change to consumers.
 
 name: Test
 
@@ -137,26 +137,33 @@ jobs:
           go build -o "$RUNNER_TEMP/hello-bin" .
           "$RUNNER_TEMP/hello-bin"
 
-      - name: import-developer-id without a p12 (unsigned path)
-        id: import
+      - name: import-developer-id without a p12 must fail
+        id: import-negative
+        continue-on-error: true
         uses: ./.github/actions/import-developer-id
+        with:
+          p12: ""
+          p12-password: ""
 
-      - name: Assert the unsigned no-op contract
+      - name: Assert missing signing state fails closed
         env:
-          SIGNED: ${{ steps.import.outputs.signed }}
+          IMPORT_OUTCOME: ${{ steps.import-negative.outcome }}
         run: |
           set -euo pipefail
-          [ "$SIGNED" = "false" ] || { echo "::error::signed should be 'false' without a p12, got '$SIGNED'"; exit 1; }
-          [ -n "${MACOS_CODESIGN_SCRIPT:-}" ] || { echo "::error::MACOS_CODESIGN_SCRIPT not exported"; exit 1; }
-          [ -x "$MACOS_CODESIGN_SCRIPT" ] || { echo "::error::$MACOS_CODESIGN_SCRIPT is not executable"; exit 1; }
-          # The script must no-op cleanly on an unsigned darwin build (this is how a
-          # goreleaser post-hook invokes it).
-          bash "$MACOS_CODESIGN_SCRIPT" "$RUNNER_TEMP/hello-bin" darwin_arm64
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            # /bin/bash is 3.2 — the dialect the empty-array set -u expansion once
-            # regressed under; exercise it explicitly.
-            /bin/bash "$MACOS_CODESIGN_SCRIPT" "$RUNNER_TEMP/hello-bin" darwin_arm64
+          [ "$IMPORT_OUTCOME" = "failure" ] || { echo "::error::missing p12 import outcome was '$IMPORT_OUTCOME', expected failure"; exit 1; }
+          script="$GITHUB_WORKSPACE/.github/actions/import-developer-id/macos-codesign.sh"
+          if bash "$script" "$RUNNER_TEMP/hello-bin" darwin_arm64; then
+            echo "::error::Darwin codesign unexpectedly succeeded without an identity"
+            exit 1
           fi
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if /bin/bash "$script" "$RUNNER_TEMP/hello-bin" darwin_arm64; then
+              echo "::error::Darwin codesign unexpectedly succeeded under bash 3.2 without an identity"
+              exit 1
+            fi
+          fi
+          # The shared script is still a no-op for a genuinely non-Darwin target.
+          bash "$script" "$RUNNER_TEMP/hello-bin" linux_amd64
           "$RUNNER_TEMP/hello-bin"
 
       # --- Swift family (macOS leg only: swift/lipo/ditto are darwin tools) ---
@@ -202,33 +209,27 @@ jobs:
           out="$("$BINARY")"
           [ "$out" = "hello from swift" ] || { echo "::error::unexpected binary output '$out'"; exit 1; }
 
-      - name: sign-notarize-binary without an identity (unsigned path)
+      - name: sign-notarize-binary without an identity must fail
         if: runner.os == 'macOS'
-        id: swift-pkg
+        id: swift-pkg-negative
+        continue-on-error: true
         uses: ./.github/actions/sign-notarize-binary
+        env:
+          MACOS_CODESIGN_SCRIPT: ${{ github.workspace }}/.github/actions/import-developer-id/macos-codesign.sh
         with:
           binary: ${{ steps.swift-build.outputs.binary }}
           name: swift-hello
           tag: v9.9.9
           attach-to-release: "false"
 
-      - name: Assert the packaged zip
+      - name: Assert an unsigned Swift binary was not packaged
         if: runner.os == 'macOS'
         env:
-          ZIP: ${{ steps.swift-pkg.outputs.zip }}
-          SHA: ${{ steps.swift-pkg.outputs.sha256 }}
+          PKG_OUTCOME: ${{ steps.swift-pkg-negative.outcome }}
         run: |
           set -euo pipefail
-          [ "$ZIP" = "dist/swift-hello-v9.9.9-darwin-universal.zip" ] || { echo "::error::unexpected zip path '$ZIP'"; exit 1; }
-          [ -f "$ZIP" ] || { echo "::error::zip missing"; exit 1; }
-          [ -f "$ZIP.sha256" ] || { echo "::error::.sha256 missing"; exit 1; }
-          recomputed="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
-          [ "$SHA" = "$recomputed" ] || { echo "::error::sha256 output ($SHA) != recomputed ($recomputed)"; exit 1; }
-          grep -q 'swift-hello-v9.9.9-darwin-universal.zip' dist/checksums.txt || { echo "::error::zip not in checksums.txt"; exit 1; }
-          # The cask's `binary` stanza needs the binary at the zip root, executable.
-          ditto -x -k "$ZIP" "$RUNNER_TEMP/swift-unzipped"
-          out="$("$RUNNER_TEMP/swift-unzipped/swift-hello")"
-          [ "$out" = "hello from swift" ] || { echo "::error::unzipped binary broken (output '$out')"; exit 1; }
+          [ "$PKG_OUTCOME" = "failure" ] || { echo "::error::unsigned package outcome was '$PKG_OUTCOME', expected failure"; exit 1; }
+          [ ! -e dist/swift-hello-v9.9.9-darwin-universal.zip ] || { echo "::error::unsigned Swift archive was created"; exit 1; }
 
       # --- Bun family (BOTH OS legs — the linux build/assert is new coverage) ---
       # Known coverage gap: release-bun.yml's setup/release jobs (idempotent auto-tag,
@@ -269,13 +270,16 @@ jobs:
           out="$("$BINARY")"
           [ "$out" = "hello from bun" ] || { echo "::error::unexpected bun binary output '$out'"; exit 1; }
 
-      # macOS leg additionally exercises the sign-notarize `platform` input on the
-      # per-arch naming path; the swift steps above keep asserting the darwin-universal
-      # default — that pairing is the backwards-compat regression test.
-      - name: sign-notarize-binary per-arch naming (unsigned path)
+      # The macOS leg proves a plausible identity without its exact Team ID still
+      # cannot reach the per-arch packaging path.
+      - name: sign-notarize-binary without Team ID must fail
         if: runner.os == 'macOS'
-        id: bun-pkg
+        id: bun-pkg-negative
+        continue-on-error: true
         uses: ./.github/actions/sign-notarize-binary
+        env:
+          MACOS_CODESIGN_SCRIPT: ${{ github.workspace }}/.github/actions/import-developer-id/macos-codesign.sh
+          MACOS_SIGN_IDENTITY: "Developer ID Application: Test (TESTTEAM)"
         with:
           binary: ${{ steps.bun-build.outputs.binary }}
           name: bun-hello
@@ -283,23 +287,14 @@ jobs:
           platform: darwin-arm64
           attach-to-release: "false"
 
-      - name: Assert the per-arch zip
+      - name: Assert a teamless Bun binary was not packaged
         if: runner.os == 'macOS'
         env:
-          ZIP: ${{ steps.bun-pkg.outputs.zip }}
-          SHA: ${{ steps.bun-pkg.outputs.sha256 }}
+          PKG_OUTCOME: ${{ steps.bun-pkg-negative.outcome }}
         run: |
           set -euo pipefail
-          [ "$ZIP" = "dist/bun-hello-v9.9.9-darwin-arm64.zip" ] || { echo "::error::unexpected zip path '$ZIP'"; exit 1; }
-          [ -f "$ZIP" ] || { echo "::error::zip missing"; exit 1; }
-          [ -f "$ZIP.sha256" ] || { echo "::error::.sha256 missing"; exit 1; }
-          recomputed="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
-          [ "$SHA" = "$recomputed" ] || { echo "::error::sha256 output ($SHA) != recomputed ($recomputed)"; exit 1; }
-          grep -q 'bun-hello-v9.9.9-darwin-arm64.zip' dist/checksums.txt || { echo "::error::zip not in checksums.txt"; exit 1; }
-          # The cask's `binary` stanza needs the binary at the zip root, executable.
-          ditto -x -k "$ZIP" "$RUNNER_TEMP/bun-unzipped"
-          out="$("$RUNNER_TEMP/bun-unzipped/bun-hello")"
-          [ "$out" = "hello from bun" ] || { echo "::error::unzipped bun binary broken (output '$out')"; exit 1; }
+          [ "$PKG_OUTCOME" = "failure" ] || { echo "::error::teamless package outcome was '$PKG_OUTCOME', expected failure"; exit 1; }
+          [ ! -e dist/bun-hello-v9.9.9-darwin-arm64.zip ] || { echo "::error::teamless Bun archive was created"; exit 1; }
 
       - name: render-formula fills the tokens
         id: render

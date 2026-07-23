@@ -13,8 +13,8 @@
 # (cgo native clang, lipo, an Xcode .app) sign this way; pure-Go repos that release on
 # ubuntu keep quill (cheaper, and fine with a full-chain p12).
 #
-# No-op unless the target is darwin AND MACOS_SIGN_IDENTITY is set, so a repo without
-# the MACOS_* secrets still releases (unsigned).
+# Non-Darwin targets are ignored. A Darwin target fails closed unless the imported
+# Developer ID identity and its derived Team ID are both present and coherent.
 #
 # Env (set by the import-developer-id action):
 #   MACOS_SIGN_IDENTITY        — "Developer ID Application: NAME (TEAMID)"
@@ -43,9 +43,17 @@ case "$target" in
 esac
 
 if [ -z "${MACOS_SIGN_IDENTITY:-}" ]; then
-  echo "macos-codesign: MACOS_SIGN_IDENTITY unset — leaving $bin unsigned"
-  exit 0
+  echo "::error::MACOS_SIGN_IDENTITY unset — refusing to ship unsigned Darwin binary $bin"
+  exit 1
 fi
+if [ -z "${TEAM_ID:-}" ]; then
+  echo "::error::TEAM_ID unset — refusing to sign Darwin binary $bin without an exact team"
+  exit 1
+fi
+case "$MACOS_SIGN_IDENTITY" in
+  *"($TEAM_ID)") ;;
+  *) echo "::error::MACOS_SIGN_IDENTITY '$MACOS_SIGN_IDENTITY' does not match TEAM_ID '$TEAM_ID'"; exit 1 ;;
+esac
 
 ents_args=()
 if [ -n "${MACOS_CODESIGN_ENTITLEMENTS:-}" ]; then
@@ -67,6 +75,11 @@ echo "macos-codesign: signing $bin ($target)"
 # on the macOS runner's bash 3.2, where a bare "${arr[@]}" on an empty array aborts.
 codesign --force --options runtime --timestamp ${ents_args[@]+"${ents_args[@]}"} ${id_args[@]+"${id_args[@]}"} -s "$MACOS_SIGN_IDENTITY" "$bin"
 codesign --verify --strict --verbose=2 "$bin"
+actual_team="$(codesign -dvv "$bin" 2>&1 | sed -n 's/^TeamIdentifier=//p' | head -n1)"
+if [ "$actual_team" != "$TEAM_ID" ]; then
+  echo "::error::signed Darwin binary $bin has TeamIdentifier '$actual_team', expected '$TEAM_ID'"
+  exit 1
+fi
 
 if [ -n "${MACOS_NOTARY_KEY_FILE:-}" ]; then
   echo "macos-codesign: notarizing $bin"

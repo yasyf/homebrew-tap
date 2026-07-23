@@ -137,12 +137,27 @@ jobs:
           go-version-file: ${{ inputs.go-version-file }}
           cache: true
 
+      - name: Require release signing credentials
+        env:
+          SIGNER: ${{ inputs.signer }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          case "$SIGNER" in
+            quill|codesign) ;;
+            *) echo "::error::unknown signer '$SIGNER'"; exit 1 ;;
+          esac
+          test -n "$MACOS_SIGN_P12" || { echo "::error::MACOS_SIGN_P12 is required; refusing an unsigned release"; exit 1; }
+          test -n "$MACOS_SIGN_PASSWORD" || { echo "::error::MACOS_SIGN_PASSWORD is required; refusing an unsigned release"; exit 1; }
+
       - name: Repo-specific pre-build setup
         if: ${{ inputs.pre-build != '' }}
         run: ${{ inputs.pre-build }}
 
       - name: Import Developer ID certificate
         if: ${{ inputs.signer == 'codesign' }}
+        id: developer-id
         uses: yasyf/homebrew-tap/.github/actions/import-developer-id@v1
         with:
           p12: ${{ secrets.MACOS_SIGN_P12 }}
@@ -150,6 +165,22 @@ jobs:
           notary-key: ${{ secrets.MACOS_NOTARY_KEY }}
           notary-key-id: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           notary-issuer-id: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+
+      - name: Verify Developer ID import
+        if: ${{ inputs.signer == 'codesign' }}
+        env:
+          SIGNED: ${{ steps.developer-id.outputs.signed }}
+          IDENTITY: ${{ steps.developer-id.outputs.identity }}
+          TEAM_ID: ${{ steps.developer-id.outputs.team-id }}
+        run: |
+          set -euo pipefail
+          [ "$SIGNED" = "true" ] || { echo "::error::Developer ID import did not report signed=true"; exit 1; }
+          test -n "$IDENTITY" || { echo "::error::Developer ID import returned no identity"; exit 1; }
+          test -n "$TEAM_ID" || { echo "::error::Developer ID import returned no Team ID"; exit 1; }
+          case "$IDENTITY" in
+            *"($TEAM_ID)") ;;
+            *) echo "::error::Developer ID identity '$IDENTITY' does not match Team ID '$TEAM_ID'"; exit 1 ;;
+          esac
 
       # install-only puts the goreleaser binary on PATH so the next step can wrap
       # `release` in a retry loop — a marketplace action step can't be retried in bash.
