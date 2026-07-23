@@ -1,5 +1,5 @@
 name: Classify and verify GoReleaser release assets
-description: Build an exact manifest and verify its checksum artifacts without publishing.
+description: Materialize the checksum-authoritative asset set and verify it without publishing.
 
 inputs:
   artifacts:

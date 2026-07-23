@@ -224,14 +224,16 @@ jobs:
           set -euo pipefail
           mkdir -p dist/bin dist/nested dist/homebrew/Casks
           printf 'archive\n' > dist/tool_darwin_arm64.tar.gz
-          printf 'nested archive\n' > dist/nested/tool_nested
-          printf 'binary\n' > dist/bin/tool
-          printf 'raw binary\n' > dist/tool_raw
+          printf 'nested release binary\n' > dist/nested/tool_nested
+          printf 'unreferenced build binary\n' > dist/bin/tool
+          printf 'unreferenced file\n' > dist/unpublished.txt
           printf 'cask\n' > dist/homebrew/Casks/tool.rb
+          printf 'signature\n' > dist/nested/tool_nested.sig
+          printf 'certificate\n' > dist/checksums.txt.pem
+          printf 'sbom\n' > dist/tool_darwin_arm64.tar.gz.sbom.json
           for path in \
             dist/tool_darwin_arm64.tar.gz \
-            dist/nested/tool_nested \
-            dist/tool_raw; do
+            dist/nested/tool_nested; do
             printf '%s  %s\n' \
               "$(shasum -a 256 "$path" | awk '{print $1}')" \
               "$(basename "$path")"
@@ -239,10 +241,13 @@ jobs:
           printf '{}\n' > dist/metadata.json
           jq -n '[
             {type:"Archive", name:"tool_darwin_arm64.tar.gz", path:"dist/tool_darwin_arm64.tar.gz"},
-            {type:"Archive", name:"tool_nested", path:"dist/nested/tool_nested"},
+            {type:"Binary", name:"tool_nested", path:"dist/nested/tool_nested"},
             {type:"Checksum", name:"checksums.txt", path:"dist/checksums.txt"},
-            {type:"Binary", name:"tool_raw", path:"dist/tool_raw"},
             {type:"Binary", name:"tool", path:"dist/bin/tool"},
+            {type:"File", name:"unpublished.txt", path:"dist/unpublished.txt"},
+            {type:"Signature", name:"tool_nested.sig", path:"dist/nested/tool_nested.sig"},
+            {type:"Certificate", name:"checksums.txt.pem", path:"dist/checksums.txt.pem"},
+            {type:"SBOM", name:"tool_darwin_arm64.tar.gz.sbom.json", path:"dist/tool_darwin_arm64.tar.gz.sbom.json"},
             {type:"Homebrew Cask", name:"tool.rb", path:"dist/homebrew/Casks/tool.rb"},
             {type:"Metadata", name:"metadata.json", path:"dist/metadata.json"}
           ]' > dist/artifacts.json
@@ -254,10 +259,12 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n' \
-            dist/checksums.txt \
-            dist/nested/tool_nested \
-            dist/tool_darwin_arm64.tar.gz \
-            dist/tool_raw \
+            "$RUNNER_TEMP/release-assets.files/checksums.txt" \
+            "$RUNNER_TEMP/release-assets.files/checksums.txt.pem" \
+            "$RUNNER_TEMP/release-assets.files/tool_darwin_arm64.tar.gz" \
+            "$RUNNER_TEMP/release-assets.files/tool_darwin_arm64.tar.gz.sbom.json" \
+            "$RUNNER_TEMP/release-assets.files/tool_nested" \
+            "$RUNNER_TEMP/release-assets.files/tool_nested.sig" \
             > "$RUNNER_TEMP/expected-assets"
           diff -u "$RUNNER_TEMP/expected-assets" "$RUNNER_TEMP/release-assets"
           jq '.[0].type = "Docker Image"' dist/artifacts.json > "$RUNNER_TEMP/unsupported.json"
@@ -267,12 +274,47 @@ jobs:
             exit 1
           fi
           mkdir -p dist/collision
-          cp dist/tool_raw dist/collision/tool_raw
-          jq '. + [{type:"File", name:"tool_raw", path:"dist/collision/tool_raw"}]' \
+          cp dist/nested/tool_nested dist/collision/tool_nested
+          jq '. + [{type:"File", name:"tool_nested", path:"dist/collision/tool_nested"}]' \
             dist/artifacts.json > "$RUNNER_TEMP/collision.json"
           if bash .github/actions/go-release-manifest/manifest.sh \
             "$RUNNER_TEMP/collision.json" "$RUNNER_TEMP/collision-assets"; then
-            echo "::error::duplicate release artifact basename was accepted"
+            echo "::error::ambiguous checksum-to-artifact mapping was accepted"
+            exit 1
+          fi
+          cp dist/checksums.txt dist/missing-checksums.txt
+          printf '%064d  absent\n' 0 >> dist/missing-checksums.txt
+          jq 'map(if .type == "Checksum" then .name = "missing-checksums.txt" | .path = "dist/missing-checksums.txt" else . end)' \
+            dist/artifacts.json > "$RUNNER_TEMP/missing.json"
+          if bash .github/actions/go-release-manifest/manifest.sh \
+            "$RUNNER_TEMP/missing.json" "$RUNNER_TEMP/missing-assets"; then
+            echo "::error::missing checksum target was accepted"
+            exit 1
+          fi
+          cp dist/checksums.txt dist/unsafe-checksums.txt
+          printf '%064d  ../tool\n' 0 >> dist/unsafe-checksums.txt
+          jq 'map(if .type == "Checksum" then .name = "unsafe-checksums.txt" | .path = "dist/unsafe-checksums.txt" else . end)' \
+            dist/artifacts.json > "$RUNNER_TEMP/unsafe.json"
+          if bash .github/actions/go-release-manifest/manifest.sh \
+            "$RUNNER_TEMP/unsafe.json" "$RUNNER_TEMP/unsafe-assets"; then
+            echo "::error::unsafe checksum target was accepted"
+            exit 1
+          fi
+          printf 'orphan signature\n' > dist/orphan.sig
+          jq '. + [{type:"Signature", name:"orphan.sig", path:"dist/orphan.sig"}]' \
+            dist/artifacts.json > "$RUNNER_TEMP/orphan.json"
+          if bash .github/actions/go-release-manifest/manifest.sh \
+            "$RUNNER_TEMP/orphan.json" "$RUNNER_TEMP/orphan-assets"; then
+            echo "::error::unattached release sidecar was accepted"
+            exit 1
+          fi
+          mkdir -p dist/duplicate
+          cp dist/nested/tool_nested.sig dist/duplicate/tool_nested.sig
+          jq '. + [{type:"Signature", name:"tool_nested.sig", path:"dist/duplicate/tool_nested.sig"}]' \
+            dist/artifacts.json > "$RUNNER_TEMP/ambiguous-sidecar.json"
+          if bash .github/actions/go-release-manifest/manifest.sh \
+            "$RUNNER_TEMP/ambiguous-sidecar.json" "$RUNNER_TEMP/ambiguous-sidecar-assets"; then
+            echo "::error::ambiguous release sidecar was accepted"
             exit 1
           fi
       - name: Prove build-only GoReleaser still renders Homebrew
@@ -301,6 +343,10 @@ jobs:
               goos: [darwin]
               goarch: [arm64]
           archives:
+            - id: binary
+              ids: [fixture]
+              formats: [binary]
+              name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
             - id: archive
               ids: [fixture]
               formats: [tar.gz]
@@ -323,13 +369,15 @@ jobs:
           git tag v1.2.3
           goreleaser release --clean --skip=publish
           test -f dist/homebrew/Casks/fixture.rb
+          jq -e 'any(.[]; .type == "Binary" and (.path | test("^dist/[^/]+/[^/]+$")))' \
+            dist/artifacts.json >/dev/null
           jq -r '.[] | select(.type == "Homebrew Cask" or .type == "Homebrew Formula") | .path' \
             dist/artifacts.json | sort > "$RUNNER_TEMP/expected-real-homebrew"
           find dist/homebrew -type f | sort > "$RUNNER_TEMP/actual-real-homebrew"
           diff -u "$RUNNER_TEMP/expected-real-homebrew" "$RUNNER_TEMP/actual-real-homebrew"
           bash "$GITHUB_WORKSPACE/.github/actions/go-release-manifest/manifest.sh" \
             dist/artifacts.json "$RUNNER_TEMP/real-release-assets"
-          test "$(wc -l < "$RUNNER_TEMP/real-release-assets" | tr -d ' ')" = 2
+          test "$(wc -l < "$RUNNER_TEMP/real-release-assets" | tr -d ' ')" = 3
 
   inline-shell:
     runs-on: ubuntu-latest
