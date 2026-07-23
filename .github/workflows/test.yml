@@ -72,11 +72,15 @@ jobs:
             fi
           done
           swift=.github/workflows/release-swift.yml
-          grep -Fq "gh release create \"\$TAG\"" "$swift"
-          grep -Fq -- '--draft --generate-notes --verify-tag' "$swift"
-          grep -Fq "gh release upload \"\$TAG\"" "$swift"
-          grep -Fq "gh release edit \"\$TAG\"" "$swift"
-          grep -Fq -- '--draft=false' "$swift"
+          grep -Fq 'actions/stage-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5' "$swift"
+          grep -Fq 'actions/publish-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5' "$swift"
+          output_ref='release-id: $'
+          output_ref+="{{ steps.draft.outputs['release-id'] }}"
+          grep -Fq "$output_ref" "$swift"
+          if grep -Eq '/releases/tags/|gh release (view|upload|download|edit)' "$swift"; then
+            echo "::error::release-swift must use the exact-ID draft actions"
+            exit 1
+          fi
           if grep -RInE '^[[:space:]-]*uses:[[:space:]]+yasyf/homebrew-tap/.+@(v[0-9]+|[a-z]+-v[0-9]+|main)$' \
             .github/workflows/release-*.yml; then
             echo "::error::shared release workflows must pin homebrew-tap actions by exact commit"

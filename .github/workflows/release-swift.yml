@@ -76,6 +76,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-swift-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ${{ inputs.runner }}
@@ -268,10 +272,8 @@ jobs:
             __REPO__=${{ github.repository }}
             __MACOS_FLOOR__=${{ inputs.macos-floor }}
 
-      - name: Stage and verify the complete draft release
+      - name: Record the exact release asset manifest
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
           ZIP: ${{ steps.pkg.outputs.zip }}
         run: |
           set -euo pipefail
@@ -279,56 +281,28 @@ jobs:
           test -f "$ZIP"
           test -f "$sidecar"
           test -f dist/checksums.txt
+          printf '%s\n' "$ZIP" "$sidecar" dist/checksums.txt \
+            > "$RUNNER_TEMP/swift-release-assets"
 
-          if state="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName 2>/dev/null)"; then
-            [ "$(jq -r .tagName <<<"$state")" = "$TAG" ]
-            [ "$(jq -r .isDraft <<<"$state")" = true ] || {
-              echo "::error::release $TAG is already public; refusing to mutate it"
-              exit 1
-            }
-          else
-            args=(--draft --generate-notes --verify-tag)
-            if [[ "$TAG" == *-* ]]; then
-              args+=(--prerelease)
-            fi
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${args[@]}"
-          fi
-
-          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
-            "$ZIP" "$sidecar" dist/checksums.txt
-
-          expected="$RUNNER_TEMP/expected-release-assets"
-          actual="$RUNNER_TEMP/actual-release-assets"
-          printf '%s\n' \
-            "$(basename "$ZIP")" \
-            "$(basename "$sidecar")" \
-            checksums.txt | sort > "$expected"
-          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
-            --jq '.assets[].name' | sort > "$actual"
-          diff -u "$expected" "$actual" || {
-            echo "::error::draft release does not contain the exact staged asset set"
-            exit 1
-          }
-
-          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq .id)"
-          for asset in "$(basename "$ZIP")" "$(basename "$sidecar")" checksums.txt; do
-            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
-              --jq ".[] | select(.name == \"${asset}\") | .browser_download_url" \
-              | grep -Fq "/releases/download/${TAG}/${asset}"
-          done
+      - name: Stage and verify the complete draft release
+        id: draft
+        uses: yasyf/homebrew-tap/.github/actions/stage-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5
+        with:
+          token: ${{ github.token }}
+          tag: ${{ steps.tag.outputs.tag }}
+          manifest: ${{ runner.temp }}/swift-release-assets
+          title: ${{ steps.tag.outputs.tag }}
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
 
       - name: Publish the verified release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
-        run: |
-          set -euo pipefail
-          prerelease=false
-          if [[ "$TAG" == *-* ]]; then
-            prerelease=true
-          fi
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --draft=false --prerelease="$prerelease"
+        uses: yasyf/homebrew-tap/.github/actions/publish-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5
+        with:
+          token: ${{ github.token }}
+          release-id: ${{ steps.draft.outputs['release-id'] }}
+          tag: ${{ steps.tag.outputs.tag }}
+          manifest: ${{ runner.temp }}/swift-release-assets
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+          make-latest: ${{ !contains(steps.tag.outputs.tag, '-') }}
 
       - name: Publish the cask to the tap
         if: ${{ !contains(steps.tag.outputs.tag, '-') }}
