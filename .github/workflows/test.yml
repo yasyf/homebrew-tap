@@ -62,6 +62,14 @@ jobs:
             echo "::error::release-app must stage an Actions artifact without mutating a GitHub Release"
             exit 1
           fi
+          for action in \
+            .github/actions/sign-notarize-app/action.yml \
+            .github/actions/sign-notarize-binary/action.yml; do
+            if grep -Eq 'attach-to-release|release-notes|softprops/action-gh-release|gh release' "$action"; then
+              echo "::error::$action must package artifacts without publishing a GitHub Release"
+              exit 1
+            fi
+          done
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -340,7 +348,6 @@ jobs:
           binary: ${{ steps.swift-build.outputs.binary }}
           name: swift-hello
           tag: v9.9.9
-          attach-to-release: "false"
 
       - name: Assert an unsigned Swift binary was not packaged
         if: runner.os == 'macOS'
@@ -406,7 +413,6 @@ jobs:
           name: bun-hello
           tag: v9.9.9
           platform: darwin-arm64
-          attach-to-release: "false"
 
       - name: Assert an unnotarized Bun binary was not packaged
         if: runner.os == 'macOS'

@@ -1,10 +1,10 @@
 name: Sign, notarize, staple a macOS .app
 description: >-
-  The shared tail for shipping a macOS .app as a Homebrew cask: (optionally)
+  The shared tail for staging a macOS .app release artifact: (optionally)
   Developer ID codesign the bundle inside-out, notarize it (fail-loud on any
   non-Accepted status), staple the ticket, and ditto-zip the stapled bundle into
-  dist/<name>-<ref>-darwin.zip. Outputs the zip's sha256 for the cask render, and
-  (by default) attaches the zip to the requested release. The .app BUILD stays per-repo (Go
+  dist/<name>-<ref>-darwin.zip. Outputs the zip's sha256 for caller-owned release
+  publication and cask rendering. The .app BUILD stays per-repo (Go
   lipo bundle, xcodebuild, Secure-Enclave helper); everything after is this action.
   Requires the import-developer-id action to have run first (reads MACOS_SIGN_IDENTITY
   + MACOS_NOTARY_* from the env). Pair with render-formula (Casks/<name>.rb, filling
@@ -36,15 +36,6 @@ inputs:
     description: bundle identifier (informational/logging)
     required: false
     default: ""
-  attach-to-release:
-    description: attach the zip + its .sha256 to the requested release
-    required: false
-    default: "true"
-  release-notes:
-    description: "generate release notes when attaching (true when this job creates the release; false when goreleaser already created it)"
-    required: false
-    default: "false"
-
 outputs:
   sha256:
     description: sha256 of the stapled .app zip (feed to render-formula as __SHA_APP__)
@@ -138,14 +129,3 @@ runs:
         echo "sha256=$sha" >> "$GITHUB_OUTPUT"
         echo "zip=$zip" >> "$GITHUB_OUTPUT"
         echo "sign-notarize-app: $zip ($sha)"
-
-    - name: Attach the .app zip to the release
-      if: ${{ inputs.attach-to-release == 'true' }}
-      uses: softprops/action-gh-release@v3
-      with:
-        tag_name: ${{ inputs.release-tag }}
-        files: |
-          ${{ steps.pkg.outputs.zip }}
-          ${{ steps.pkg.outputs.zip }}.sha256
-        generate_release_notes: ${{ inputs.release-notes == 'true' }}
-        prerelease: ${{ contains(inputs.release-tag, '-') }}

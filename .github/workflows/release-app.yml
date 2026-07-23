@@ -574,7 +574,6 @@ jobs:
           release-tag: ${{ github.ref_name }}
           bundle-id: ${{ inputs.bundle_id }}
           sign: "false"
-          attach-to-release: "false"
 
       - name: Assert final per-target signatures and entitlements
         env:

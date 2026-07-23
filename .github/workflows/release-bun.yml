@@ -273,7 +273,6 @@ jobs:
           name: ${{ inputs.name }}
           tag: ${{ needs.setup.outputs.tag }}
           platform: ${{ matrix.platform }}
-          attach-to-release: "false"
 
       - name: Smoke-test the signed binary
         if: ${{ startsWith(matrix.platform, 'darwin') && inputs.smoke-command != '' }}
@@ -348,9 +347,8 @@ jobs:
           set -euo pipefail
           (cd dist && shasum -a 256 -- *.zip > checksums.txt)
 
-      # Single release-creation point: the matrix legs never attach (attach-to-release:
-      # false), avoiding the softprops concurrent-create race — one call here owns the
-      # release, its notes, and the prerelease flag.
+      # Single release-creation point: signing actions only stage artifacts, so one
+      # caller-owned step controls the release, its notes, and the prerelease flag.
       - name: Create the GitHub release
         uses: softprops/action-gh-release@v3
         with:

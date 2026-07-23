@@ -5,7 +5,7 @@ description: >-
   — fail-closed identity/team verification, 3x submit retry, fail-loud on a
   non-Accepted verdict),
   ditto-zip it into dist/<name>-<tag>-<platform>.zip with a .sha256 and a
-  checksums.txt, and (by default) create/attach to the tag's GitHub release.
+  checksums.txt for caller-owned release publication.
   Outputs the zip's sha256 for the cask render. A bare binary cannot be stapled
   (stapler is .app/.dmg/.pkg-only); Gatekeeper verifies the notarization against
   the cdhash online, same as the Go pipeline's quill path. Language-agnostic —
@@ -33,18 +33,6 @@ inputs:
       values engage signing. Default preserves the Swift family's universal naming.
     required: false
     default: "darwin-universal"
-  attach-to-release:
-    description: attach the zip + its .sha256 + checksums.txt to the tag's release
-    required: false
-    default: "true"
-  release-notes:
-    description: >-
-      generate release notes when attaching. Defaults true — unlike
-      sign-notarize-app, whose caller's goreleaser usually creates the release
-      first, this action's workflow (release-swift.yml) creates the release here.
-    required: false
-    default: "true"
-
 outputs:
   sha256:
     description: sha256 of the shipped zip (feed to render-formula as __SHA__)
@@ -104,15 +92,3 @@ runs:
         echo "sha256=$sha" >> "$GITHUB_OUTPUT"
         echo "zip=$zip" >> "$GITHUB_OUTPUT"
         echo "sign-notarize-binary: $zip ($sha)"
-
-    - name: Attach the zip to the release
-      if: ${{ inputs.attach-to-release == 'true' }}
-      uses: softprops/action-gh-release@v3
-      with:
-        tag_name: ${{ inputs.tag }}
-        files: |
-          ${{ steps.pkg.outputs.zip }}
-          ${{ steps.pkg.outputs.zip }}.sha256
-          dist/checksums.txt
-        generate_release_notes: ${{ inputs.release-notes == 'true' }}
-        prerelease: ${{ contains(inputs.tag, '-') }}
