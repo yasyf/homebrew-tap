@@ -1,29 +1,29 @@
 # cc-pool Notification Center widget (CCPoolStatus.app) cask. GENERATED per release
 # by yasyf/homebrew-tap release-app.yml — edit .github/cask/cc-pool-status.rb.tmpl.
 #
-# Developer ID signed, notarized, and stapled, so Gatekeeper validates it offline.
-# Install with `ccp widget`, or by hand: brew install --cask yasyf/tap/cc-pool-status
+# Developer ID signed, notarized, and stapled, so Gatekeeper validates the
+# quarantined download. Install with `ccp widget`, or by hand:
+# brew install --cask yasyf/tap/cc-pool-status
 cask "cc-pool-status" do
-  version "0.61.7"
-  sha256 "4947d80fd5b8bf59a128f9895fcd71e6d52eb2e0b4cc4f5a73a4fbf6f5b92413" # app
+  version "0.62.0"
+  sha256 "2410bc578e86b77dfcd9567ef72aa5f67ece7f228c2497561f4e7fc7913b70c2" # app
 
-  url "https://github.com/yasyf/cc-pool/releases/download/v0.61.7/cc-pool-status-v0.61.7-darwin.zip"
+  url "https://github.com/yasyf/cc-pool/releases/download/v0.62.0/cc-pool-status-v0.62.0-darwin.zip"
   name "cc-pool Status"
-  desc "cc-pool status, File Provider, and fixed FuseKit holder app"
+  desc "cc-pool status, File Provider, and widget app"
   homepage "https://github.com/yasyf/cc-pool"
 
   depends_on macos: :sequoia # deployment target is macOS 15
-  depends_on cask: "macos-fuse-t/homebrew-cask/fuse-t"
   depends_on formula: "cc-pool"
 
   app "CCPoolStatus.app", target: "/Applications/CCPoolStatus.app"
 
   preflight do
-    # The exact daemonkit AppKeepAlive.Stop path must settle the signed holder
+    # The exact daemonkit AppKeepAlive.Stop path must settle the signed runtime
     # and unregister its service before Homebrew replaces the bundle.
     if Dir.exist?("/Applications/CCPoolStatus.app")
       system_command "#{HOMEBREW_PREFIX}/bin/ccp",
-                     args: ["service", "holder-stop-uninstall"],
+                     args: ["service", "runtime-stop-uninstall"],
                      must_succeed: true
     end
   end
@@ -33,7 +33,7 @@ cask "cc-pool-status" do
     # tenant provisioning must never race an absent extension registration.
     system_command "/usr/bin/pluginkit", args: ["-a", "/Applications/CCPoolStatus.app/Contents/PlugIns/CCPoolFileProvider.appex"], must_succeed: true
     system_command "/usr/bin/pluginkit", args: ["-e", "use", "-i", "com.yasyf.cc-pool.status.fileprovider"], must_succeed: true
-    # The daemonkit-owned LaunchAgent is the sole holder lifecycle authority.
+    # The daemonkit-owned LaunchAgent is the sole runtime lifecycle authority.
     system_command "#{HOMEBREW_PREFIX}/bin/ccp",
                    args: ["service", "install"],
                    must_succeed: true
@@ -41,7 +41,7 @@ cask "cc-pool-status" do
 
   uninstall_preflight do
     system_command "#{HOMEBREW_PREFIX}/bin/ccp",
-                   args: ["service", "holder-stop-uninstall"],
+                   args: ["service", "runtime-stop-uninstall"],
                    must_succeed: true
   end
 

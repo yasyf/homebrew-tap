@@ -12,8 +12,8 @@
 class CcPool < Formula
   desc "Predictive multi-account load-balancing for Claude Code"
   homepage "https://github.com/yasyf/cc-pool"
-  url "https://github.com/yasyf/cc-pool/releases/download/v0.61.7/cc-pool-v0.61.7-darwin-universal.tar.gz"
-  sha256 "bfc3bac07f2704c1d9113960681301cfde742744e70c2f460e58f5a1e2366fde" # pure
+  url "https://github.com/yasyf/cc-pool/releases/download/v0.62.0/cc-pool-v0.62.0-darwin-universal.tar.gz"
+  sha256 "e5ec369e04ffb7273b23c540516ba7814f55a2a5c2290567a7c1df139530b9be" # pure
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -54,7 +54,7 @@ class CcPool < Formula
         ccp             # walks you through pooling your subscriptions
         ccp run         # launch claude on the emptiest account
 
-      The daemon requires the fixed signed status/File Provider/holder app.
+      The daemon requires the fixed signed CCPoolStatus/File Provider app.
       Install the complete stack with:
         brew install --cask yasyf/tap/cc-pool-status
         ccp service install
