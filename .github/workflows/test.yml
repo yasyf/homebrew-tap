@@ -82,6 +82,15 @@ jobs:
             echo "::error::shared release workflows must pin homebrew-tap actions by exact commit"
             exit 1
           fi
+          stage=.github/actions/stage-draft-release/stage.sh
+          publish=.github/actions/publish-draft-release/publish.sh
+          grep -Fq -- "--paginate \"repos/\${GITHUB_REPOSITORY}/releases?per_page=100\"" "$stage"
+          grep -Fq "releases/\${release_id}/assets?per_page=100" "$stage"
+          grep -Fq "releases/\${RELEASE_ID}/assets?per_page=100" "$publish"
+          if grep -Eq '/releases/tags/|gh release (view|upload|download|edit)' "$stage" "$publish"; then
+            echo "::error::draft release actions must retain one exact REST release ID"
+            exit 1
+          fi
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -93,9 +102,11 @@ jobs:
           checked=(
             .github/actions/import-developer-id/macos-codesign.sh
             .github/actions/prepare-app-build/prepare.sh
+            .github/actions/publish-draft-release/publish.sh
             .github/actions/publish/delete-exact-file.sh
             .github/actions/publish/reject-retired-surfaces.sh
             .github/actions/sign-notarize-app/write-sha256-sidecar.sh
+            .github/actions/stage-draft-release/stage.sh
             .github/test-fixtures/prebuild-hook.sh
           )
           shellcheck "${checked[@]}"

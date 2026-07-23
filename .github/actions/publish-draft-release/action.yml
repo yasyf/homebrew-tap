@@ -1,0 +1,38 @@
+name: Publish an exact draft release
+description: Verify exact release assets by ID and make that release public as the final mutation.
+
+inputs:
+  token:
+    description: GitHub token with contents write permission
+    required: true
+  release-id:
+    description: Stable numeric release identity returned by stage-draft-release
+    required: true
+  tag:
+    description: Exact release tag
+    required: true
+  manifest:
+    description: File containing one exact asset path per line
+    required: true
+  prerelease:
+    description: Whether the release is a prerelease
+    required: false
+    default: "false"
+
+outputs:
+  url:
+    description: Public release URL
+    value: ${{ steps.publish.outputs.url }}
+
+runs:
+  using: composite
+  steps:
+    - id: publish
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        RELEASE_ID: ${{ inputs.release-id }}
+        RELEASE_TAG: ${{ inputs.tag }}
+        ASSET_MANIFEST: ${{ inputs.manifest }}
+        RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+      run: bash "$GITHUB_ACTION_PATH/publish.sh"

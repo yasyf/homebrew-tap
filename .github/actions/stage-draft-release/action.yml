@@ -1,0 +1,45 @@
+name: Stage an exact draft release
+description: Resolve one release identity, stage exact assets, and verify downloaded bytes without publishing.
+
+inputs:
+  token:
+    description: GitHub token with contents write permission
+    required: true
+  tag:
+    description: Exact existing release tag
+    required: true
+  manifest:
+    description: File containing one exact asset path per line
+    required: true
+  title:
+    description: Release title; empty uses the tag
+    required: false
+    default: ""
+  prerelease:
+    description: Whether the release is a prerelease
+    required: false
+    default: "false"
+
+outputs:
+  release-id:
+    description: Stable numeric GitHub release identity
+    value: ${{ steps.stage.outputs.release_id }}
+  download-dir:
+    description: Directory containing exact bytes downloaded by asset ID
+    value: ${{ steps.stage.outputs.download_dir }}
+  already-published:
+    description: Whether an exact public release already existed
+    value: ${{ steps.stage.outputs.already_published }}
+
+runs:
+  using: composite
+  steps:
+    - id: stage
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        RELEASE_TAG: ${{ inputs.tag }}
+        ASSET_MANIFEST: ${{ inputs.manifest }}
+        RELEASE_TITLE: ${{ inputs.title }}
+        RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+      run: bash "$GITHUB_ACTION_PATH/stage.sh"
