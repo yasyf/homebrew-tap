@@ -151,6 +151,7 @@ jobs:
           bun=.github/workflows/release-bun.yml
           test "$(grep -Ec "actions/stage-draft-release@${draft_pin}$" "$bun")" = 1
           test "$(grep -Ec "actions/publish-draft-release@${draft_pin}$" "$bun")" = 1
+          test "$(grep -Ec "actions/publish@${publish_pin}$" "$bun")" = 1
           test "$(grep -Fc 'bun-release-assets' "$bun")" = 3
           test "$(grep -Fc 'for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do' "$bun")" = 2
           test "$(grep -Fc 'cancel-in-progress: false' "$bun")" = 1
@@ -172,12 +173,14 @@ jobs:
           bun_stage="$(grep -Fn 'name: Stage and verify the complete draft release' "$bun" | cut -d: -f1)"
           bun_verify="$(grep -Fn 'name: Verify the exact staged release bytes' "$bun" | cut -d: -f1)"
           bun_render="$(grep -Fn 'name: Render the cask' "$bun" | cut -d: -f1)"
+          bun_tap_verify="$(grep -Fn 'name: Verify the exact Homebrew staging' "$bun" | cut -d: -f1)"
           bun_tap="$(grep -Fn 'name: Publish the cask to the tap' "$bun" | cut -d: -f1)"
           bun_publish="$(grep -Fn 'name: Publish the verified release' "$bun" | cut -d: -f1)"
           test "$bun_stage" -lt "$bun_verify"
           test "$bun_verify" -lt "$bun_render"
-          test "$bun_render" -lt "$bun_tap"
-          test "$bun_tap" -lt "$bun_publish"
+          test "$bun_render" -lt "$bun_tap_verify"
+          test "$bun_tap_verify" -lt "$bun_publish"
+          test "$bun_publish" -lt "$bun_tap"
 
   shellcheck:
     runs-on: ubuntu-latest

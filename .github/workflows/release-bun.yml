@@ -514,13 +514,22 @@ jobs:
             __SHA_LINUX_X64__=${{ steps.shas.outputs.linux_x64 }}
             __SHA_LINUX_ARM64__=${{ steps.shas.outputs.linux_arm64 }}
 
-      - name: Publish the cask to the tap
+      - name: Verify the exact Homebrew staging
         if: ${{ !contains(needs.setup.outputs.tag, '-') }}
-        uses: yasyf/homebrew-tap/.github/actions/publish@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
-        with:
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          dir: tap-staging
-          message: "${{ inputs.name }} ${{ needs.setup.outputs.tag }}"
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          expected="tap-staging/Casks/${NAME}.rb"
+          actual="$RUNNER_TEMP/bun-homebrew-files"
+          test -f "$expected" || { echo "::error::missing expected cask $expected"; exit 1; }
+          printf '%s\n' "$expected" > "$RUNNER_TEMP/expected-bun-homebrew-files"
+          find tap-staging -type f | sort > "$actual"
+          diff -u "$RUNNER_TEMP/expected-bun-homebrew-files" "$actual" || {
+            echo "::error::Homebrew staging contains unclassified or missing files"
+            exit 1
+          }
+          ruby -c "$expected"
 
       - name: Publish the verified release
         uses: yasyf/homebrew-tap/.github/actions/publish-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5
@@ -531,3 +540,11 @@ jobs:
           manifest: ${{ runner.temp }}/bun-release-assets
           prerelease: ${{ contains(needs.setup.outputs.tag, '-') }}
           make-latest: ${{ !contains(needs.setup.outputs.tag, '-') }}
+
+      - name: Publish the cask to the tap
+        if: ${{ !contains(needs.setup.outputs.tag, '-') }}
+        uses: yasyf/homebrew-tap/.github/actions/publish@9ca67392d45d66b6ae01e262383c8f3138d56f5e
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          dir: tap-staging
+          message: "${{ inputs.name }} ${{ needs.setup.outputs.tag }}"
