@@ -36,9 +36,7 @@ cask "cookiesync" do
   # into the bundle and tccd keys the grant to the bundle identifier.
   binary "CookieSync.app/Contents/MacOS/cookiesync"
 
-  # The .app is notarized + stapled, so Gatekeeper clears it offline; the recursive
-  # quarantine strip on the bundle keeps a first exec friction-free even if the staple
-  # check is skipped.
+  # The .app is notarized + stapled, so Gatekeeper validates it offline.
   #
   # brew upgrade swaps the staged bundle on disk but never touches launchd, so the
   # resident helper (com.github.yasyf.synckit.helper.cookiesync) keeps serving the old
@@ -46,9 +44,6 @@ cask "cookiesync" do
   # must_succeed: false keeps first install a no-op — the agent only exists after
   # `cookiesync install` + `synckitd install`.
   postflight do
-    system_command "/usr/bin/xattr",
-                   args:         ["-dr", "com.apple.quarantine", "#{staged_path}/CookieSync.app"],
-                   must_succeed: false
     system_command "/bin/launchctl",
                    args:         ["kickstart", "-k", "gui/#{Process.uid}/com.github.yasyf.synckit.helper.cookiesync"],
                    must_succeed: false,

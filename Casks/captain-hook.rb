@@ -1,8 +1,7 @@
 # Homebrew cask for the Captain Hook helper app (Captain Hook.app).
 #
 # Developer ID signed, notarized, and stapled, so Gatekeeper validates the app
-# offline; the postflight strips Homebrew's download quarantine so the first
-# launch is silent. Modeled on daemonkit/templates/cask.rb.tmpl.
+# offline. Modeled on daemonkit/templates/cask.rb.tmpl.
 #
 #   brew install --cask yasyf/tap/captain-hook
 #
@@ -36,11 +35,6 @@ cask "captain-hook" do
   end
 
   postflight do
-    # Strip Homebrew's download quarantine so first launch is silent
-    # (notarized + stapled).
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Captain Hook.app"],
-                   must_succeed: false
     # Relaunch in the background (-g: no focus steal). Launching runs the app's
     # LoginItem.reconcile(), which re-registers the login-item agent.
     system_command "/usr/bin/open", args: ["-g", "#{appdir}/Captain Hook.app"], must_succeed: false

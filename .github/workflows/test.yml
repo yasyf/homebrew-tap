@@ -144,6 +144,9 @@ jobs:
         with:
           p12: ""
           p12-password: ""
+          notary-key: ""
+          notary-key-id: ""
+          notary-issuer-id: ""
 
       - name: Assert missing signing state fails closed
         env:
@@ -154,6 +157,11 @@ jobs:
           script="$GITHUB_WORKSPACE/.github/actions/import-developer-id/macos-codesign.sh"
           if bash "$script" "$RUNNER_TEMP/hello-bin" darwin_arm64; then
             echo "::error::Darwin codesign unexpectedly succeeded without an identity"
+            exit 1
+          fi
+          if env -u TEAM_ID MACOS_SIGN_IDENTITY='Developer ID Application: Test (TESTTEAM)' \
+            bash "$script" "$RUNNER_TEMP/hello-bin" darwin_arm64; then
+            echo "::error::Darwin codesign unexpectedly succeeded without a Team ID"
             exit 1
           fi
           if [ "$RUNNER_OS" = "macOS" ]; then
@@ -270,9 +278,9 @@ jobs:
           out="$("$BINARY")"
           [ "$out" = "hello from bun" ] || { echo "::error::unexpected bun binary output '$out'"; exit 1; }
 
-      # The macOS leg proves a plausible identity without its exact Team ID still
+      # The macOS leg proves an exact identity/team without notary credentials still
       # cannot reach the per-arch packaging path.
-      - name: sign-notarize-binary without Team ID must fail
+      - name: sign-notarize-binary without notary state must fail
         if: runner.os == 'macOS'
         id: bun-pkg-negative
         continue-on-error: true
@@ -280,6 +288,7 @@ jobs:
         env:
           MACOS_CODESIGN_SCRIPT: ${{ github.workspace }}/.github/actions/import-developer-id/macos-codesign.sh
           MACOS_SIGN_IDENTITY: "Developer ID Application: Test (TESTTEAM)"
+          TEAM_ID: TESTTEAM
         with:
           binary: ${{ steps.bun-build.outputs.binary }}
           name: bun-hello
@@ -287,14 +296,14 @@ jobs:
           platform: darwin-arm64
           attach-to-release: "false"
 
-      - name: Assert a teamless Bun binary was not packaged
+      - name: Assert an unnotarized Bun binary was not packaged
         if: runner.os == 'macOS'
         env:
           PKG_OUTCOME: ${{ steps.bun-pkg-negative.outcome }}
         run: |
           set -euo pipefail
-          [ "$PKG_OUTCOME" = "failure" ] || { echo "::error::teamless package outcome was '$PKG_OUTCOME', expected failure"; exit 1; }
-          [ ! -e dist/bun-hello-v9.9.9-darwin-arm64.zip ] || { echo "::error::teamless Bun archive was created"; exit 1; }
+          [ "$PKG_OUTCOME" = "failure" ] || { echo "::error::unnotarized package outcome was '$PKG_OUTCOME', expected failure"; exit 1; }
+          [ ! -e dist/bun-hello-v9.9.9-darwin-arm64.zip ] || { echo "::error::unnotarized Bun archive was created"; exit 1; }
 
       - name: render-formula fills the tokens
         id: render

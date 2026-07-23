@@ -12,13 +12,6 @@ cask "cc-sudo" do
 
   binary "cc-sudo"
 
-  postflight do
-    if OS.mac?
-      system_command "/usr/bin/xattr",
-                     args: ["-dr", "com.apple.quarantine", "#{staged_path}/cc-sudo"]
-    end
-  end
-
   livecheck do
     skip "Auto-generated on release."
   end

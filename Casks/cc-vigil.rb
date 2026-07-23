@@ -1,8 +1,7 @@
 # Homebrew cask for the cc-vigil menu-bar app (CCVigil.app).
 #
 # The app is Developer ID signed, notarized, and stapled, so Gatekeeper
-# validates it offline; the postflight strips Homebrew's download quarantine so
-# the first launch is silent. There is no `service` block: cc-vigil registers
+# validates it offline. There is no `service` block: cc-vigil registers
 # its per-user LaunchAgent and root LaunchDaemon itself, via SMAppService, during
 # the app's first-run setup.
 #
@@ -27,14 +26,6 @@ cask "cc-vigil" do
   depends_on macos: :sequoia
 
   app "CCVigil.app"
-
-  postflight do
-    # Strip Homebrew's download quarantine so the first launch is silent
-    # (the app is notarized + stapled, so Gatekeeper still validates it).
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/CCVigil.app"],
-                   must_succeed: false
-  end
 
   uninstall quit: "dev.yasyf.cc-vigil"
 

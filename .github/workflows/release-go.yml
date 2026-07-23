@@ -142,6 +142,9 @@ jobs:
           SIGNER: ${{ inputs.signer }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
           MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
           case "$SIGNER" in
@@ -150,6 +153,9 @@ jobs:
           esac
           test -n "$MACOS_SIGN_P12" || { echo "::error::MACOS_SIGN_P12 is required; refusing an unsigned release"; exit 1; }
           test -n "$MACOS_SIGN_PASSWORD" || { echo "::error::MACOS_SIGN_PASSWORD is required; refusing an unsigned release"; exit 1; }
+          test -n "$MACOS_NOTARY_KEY" || { echo "::error::MACOS_NOTARY_KEY is required; refusing an unnotarized release"; exit 1; }
+          test -n "$MACOS_NOTARY_KEY_ID" || { echo "::error::MACOS_NOTARY_KEY_ID is required; refusing an unnotarized release"; exit 1; }
+          test -n "$MACOS_NOTARY_ISSUER_ID" || { echo "::error::MACOS_NOTARY_ISSUER_ID is required; refusing an unnotarized release"; exit 1; }
 
       - name: Repo-specific pre-build setup
         if: ${{ inputs.pre-build != '' }}

@@ -34,12 +34,6 @@ cask "cc-runtime" do
 
   binary "cc-runtime"
 
-  postflight do
-    if OS.mac?
-      system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/cc-runtime"]
-    end
-  end
-
   # No zap stanza required
 
 end

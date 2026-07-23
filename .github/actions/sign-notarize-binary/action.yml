@@ -69,6 +69,9 @@ runs:
         test -n "${MACOS_CODESIGN_SCRIPT:-}" || { echo "::error::MACOS_CODESIGN_SCRIPT unset — run the import-developer-id action first"; exit 1; }
         test -n "${MACOS_SIGN_IDENTITY:-}" || { echo "::error::MACOS_SIGN_IDENTITY unset — refusing to package an unsigned Darwin binary"; exit 1; }
         test -n "${TEAM_ID:-}" || { echo "::error::TEAM_ID unset — refusing to package a Darwin binary without an exact team"; exit 1; }
+        test -s "${MACOS_NOTARY_KEY_FILE:-}" || { echo "::error::MACOS_NOTARY_KEY_FILE missing — refusing to package an unnotarized Darwin binary"; exit 1; }
+        test -n "${MACOS_NOTARY_KEY_ID:-}" || { echo "::error::MACOS_NOTARY_KEY_ID unset — refusing to package an unnotarized Darwin binary"; exit 1; }
+        test -n "${MACOS_NOTARY_ISSUER:-}" || { echo "::error::MACOS_NOTARY_ISSUER unset — refusing to package an unnotarized Darwin binary"; exit 1; }
         case "$MACOS_SIGN_IDENTITY" in
           *"($TEAM_ID)") ;;
           *) echo "::error::MACOS_SIGN_IDENTITY '$MACOS_SIGN_IDENTITY' does not match TEAM_ID '$TEAM_ID'"; exit 1 ;;

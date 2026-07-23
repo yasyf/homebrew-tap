@@ -17,17 +17,14 @@ inputs:
     description: password for the .p12
     required: true
   notary-key:
-    description: base64-encoded App Store Connect API .p8 (enables notarization)
-    required: false
-    default: ""
+    description: base64-encoded App Store Connect API .p8
+    required: true
   notary-key-id:
     description: App Store Connect API key id
-    required: false
-    default: ""
+    required: true
   notary-issuer-id:
     description: App Store Connect issuer id (exported as MACOS_NOTARY_ISSUER for notarytool)
-    required: false
-    default: ""
+    required: true
 
 outputs:
   signed:
@@ -57,6 +54,9 @@ runs:
 
         test -n "${MACOS_SIGN_P12}" || { echo "::error::MACOS_SIGN_P12 is required; refusing an unsigned release"; exit 1; }
         test -n "${MACOS_SIGN_PASSWORD}" || { echo "::error::MACOS_SIGN_PASSWORD is required; refusing an unsigned release"; exit 1; }
+        test -n "${MACOS_NOTARY_KEY}" || { echo "::error::MACOS_NOTARY_KEY is required; refusing an unnotarized release"; exit 1; }
+        test -n "${MACOS_NOTARY_KEY_ID}" || { echo "::error::MACOS_NOTARY_KEY_ID is required; refusing an unnotarized release"; exit 1; }
+        test -n "${MACOS_NOTARY_ISSUER_ID}" || { echo "::error::MACOS_NOTARY_ISSUER_ID is required; refusing an unnotarized release"; exit 1; }
         if [ "${RUNNER_OS}" != "macOS" ]; then
           echo "::error title=Wrong runner::import-developer-id needs a macOS runner (codesign/notarytool are macOS-only). Use the quill signing path on ubuntu instead, or set runs-on: macos-*."
           exit 1
@@ -95,19 +95,12 @@ runs:
           echo "TEAM_ID=$TEAM_ID"
         } >> "$GITHUB_ENV"
 
-        # Notary key is optional: signing without it produces a signed-but-not-notarized
-        # binary. When present, expose the .p8 + ids under the standardized names the
-        # shared macos-codesign.sh (and notarytool) read.
-        if [ -n "${MACOS_NOTARY_KEY}" ]; then
-          echo -n "$MACOS_NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
-          {
-            echo "MACOS_NOTARY_KEY_FILE=$RUNNER_TEMP/notary.p8"
-            echo "MACOS_NOTARY_KEY_ID=$MACOS_NOTARY_KEY_ID"
-            echo "MACOS_NOTARY_ISSUER=$MACOS_NOTARY_ISSUER_ID"
-          } >> "$GITHUB_ENV"
-        else
-          echo "import-developer-id: no notary key — binaries will be signed but not notarized."
-        fi
+        echo -n "$MACOS_NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+        {
+          echo "MACOS_NOTARY_KEY_FILE=$RUNNER_TEMP/notary.p8"
+          echo "MACOS_NOTARY_KEY_ID=$MACOS_NOTARY_KEY_ID"
+          echo "MACOS_NOTARY_ISSUER=$MACOS_NOTARY_ISSUER_ID"
+        } >> "$GITHUB_ENV"
 
         echo "signed=true" >> "$GITHUB_OUTPUT"
         echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"

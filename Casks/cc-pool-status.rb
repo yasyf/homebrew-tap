@@ -1,9 +1,8 @@
 # cc-pool Notification Center widget (CCPoolStatus.app) cask. GENERATED per release
 # by yasyf/homebrew-tap release-app.yml — edit .github/cask/cc-pool-status.rb.tmpl.
 #
-# Developer ID signed, notarized, and stapled, so Gatekeeper validates it offline;
-# the postflight strips the download quarantine so first launch is silent. Install
-# with `ccp widget`, or by hand: brew install --cask yasyf/tap/cc-pool-status
+# Developer ID signed, notarized, and stapled, so Gatekeeper validates it offline.
+# Install with `ccp widget`, or by hand: brew install --cask yasyf/tap/cc-pool-status
 cask "cc-pool-status" do
   version "0.61.7"
   sha256 "4947d80fd5b8bf59a128f9895fcd71e6d52eb2e0b4cc4f5a73a4fbf6f5b92413" # app
@@ -30,10 +29,6 @@ cask "cc-pool-status" do
   end
 
   postflight do
-    # Strip Homebrew's download quarantine so first launch is silent (notarized+stapled).
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "/Applications/CCPoolStatus.app"],
-                   must_succeed: false
     # Register and elect the exact File Provider before starting the daemon;
     # tenant provisioning must never race an absent extension registration.
     system_command "/usr/bin/pluginkit", args: ["-a", "/Applications/CCPoolStatus.app/Contents/PlugIns/CCPoolFileProvider.appex"], must_succeed: true

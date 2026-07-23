@@ -36,7 +36,6 @@ cask "cc-patch" do
 
   postflight do
     if OS.mac?
-      system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/cc-patch"]
       system_command "#{staged_path}/cc-patch", args: ["install-daemons"], must_succeed: false
     end
   end

@@ -18,7 +18,7 @@
 #
 # Env (set by the import-developer-id action):
 #   MACOS_SIGN_IDENTITY        — "Developer ID Application: NAME (TEAMID)"
-#   MACOS_NOTARY_KEY_FILE      — path to the App Store Connect API .p8 (enables notarization)
+#   MACOS_NOTARY_KEY_FILE      — path to the required App Store Connect API .p8
 #   MACOS_NOTARY_KEY_ID        — the key's Key ID
 #   MACOS_NOTARY_ISSUER        — the team's Issuer ID
 #   MACOS_CODESIGN_ENTITLEMENTS — optional path to an entitlements plist.
@@ -54,6 +54,9 @@ case "$MACOS_SIGN_IDENTITY" in
   *"($TEAM_ID)") ;;
   *) echo "::error::MACOS_SIGN_IDENTITY '$MACOS_SIGN_IDENTITY' does not match TEAM_ID '$TEAM_ID'"; exit 1 ;;
 esac
+test -s "${MACOS_NOTARY_KEY_FILE:-}" || { echo "::error::MACOS_NOTARY_KEY_FILE missing — refusing to ship unnotarized Darwin binary $bin"; exit 1; }
+test -n "${MACOS_NOTARY_KEY_ID:-}" || { echo "::error::MACOS_NOTARY_KEY_ID unset — refusing to ship unnotarized Darwin binary $bin"; exit 1; }
+test -n "${MACOS_NOTARY_ISSUER:-}" || { echo "::error::MACOS_NOTARY_ISSUER unset — refusing to ship unnotarized Darwin binary $bin"; exit 1; }
 
 ents_args=()
 if [ -n "${MACOS_CODESIGN_ENTITLEMENTS:-}" ]; then
@@ -81,41 +84,39 @@ if [ "$actual_team" != "$TEAM_ID" ]; then
   exit 1
 fi
 
-if [ -n "${MACOS_NOTARY_KEY_FILE:-}" ]; then
-  echo "macos-codesign: notarizing $bin"
-  zip="$(mktemp -d)/$(basename "$bin").zip"
-  ditto -c -k "$bin" "$zip"
-  # notarytool submit --wait exits 0 even on an Invalid result, so capture the JSON and
-  # FAIL LOUD unless status == Accepted, dumping the per-issue log (the only place the
-  # rejection reason appears).
-  out="$(mktemp -d)/notary.json"
-  # notarytool's submit/upload is the flakiest step (network, Apple 5xx, timeout); the release
-  # only publishes after notarization succeeds, so a clean retry is safe. Retry the submit up to
-  # 3x with backoff. A SUCCESSFUL submit that returns a non-Accepted status is a terminal verdict
-  # on the binary, not a hiccup — that is handled below (fail loud), never retried.
-  attempt=1
-  while :; do
-    if xcrun notarytool submit "$zip" \
-      --key "$MACOS_NOTARY_KEY_FILE" \
-      --key-id "$MACOS_NOTARY_KEY_ID" \
-      --issuer "$MACOS_NOTARY_ISSUER" \
-      --wait --timeout 20m --output-format json > "$out"; then
-      break
-    fi
-    if [ "$attempt" -ge 3 ]; then
-      echo "::error::notarytool submit failed for $bin after 3 attempts"; exit 1
-    fi
-    echo "::warning::notarytool submit failed for $bin (attempt $attempt/3); retrying in $((attempt * 30))s"
-    sleep "$((attempt * 30))"
-    attempt=$((attempt + 1))
-  done
-  cat "$out"
-  sid="$(plutil -extract id raw -o - "$out")"
-  if [ "$(plutil -extract status raw -o - "$out")" != "Accepted" ]; then
-    xcrun notarytool log "$sid" \
-      --key "$MACOS_NOTARY_KEY_FILE" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER" || true
-    echo "::error::notarization not Accepted for $bin (submission $sid)"; exit 1
+echo "macos-codesign: notarizing $bin"
+zip="$(mktemp -d)/$(basename "$bin").zip"
+ditto -c -k "$bin" "$zip"
+# notarytool submit --wait exits 0 even on an Invalid result, so capture the JSON and
+# FAIL LOUD unless status == Accepted, dumping the per-issue log (the only place the
+# rejection reason appears).
+out="$(mktemp -d)/notary.json"
+# notarytool's submit/upload is the flakiest step (network, Apple 5xx, timeout); the release
+# only publishes after notarization succeeds, so a clean retry is safe. Retry the submit up to
+# 3x with backoff. A SUCCESSFUL submit that returns a non-Accepted status is a terminal verdict
+# on the binary, not a hiccup — that is handled below (fail loud), never retried.
+attempt=1
+while :; do
+  if xcrun notarytool submit "$zip" \
+    --key "$MACOS_NOTARY_KEY_FILE" \
+    --key-id "$MACOS_NOTARY_KEY_ID" \
+    --issuer "$MACOS_NOTARY_ISSUER" \
+    --wait --timeout 20m --output-format json > "$out"; then
+    break
   fi
-  # A bare Mach-O can't be stapled; notarization is recorded against its cdhash and
-  # verified online by Gatekeeper. (.app bundles are stapled by the macos-app-cask action.)
+  if [ "$attempt" -ge 3 ]; then
+    echo "::error::notarytool submit failed for $bin after 3 attempts"; exit 1
+  fi
+  echo "::warning::notarytool submit failed for $bin (attempt $attempt/3); retrying in $((attempt * 30))s"
+  sleep "$((attempt * 30))"
+  attempt=$((attempt + 1))
+done
+cat "$out"
+sid="$(plutil -extract id raw -o - "$out")"
+if [ "$(plutil -extract status raw -o - "$out")" != "Accepted" ]; then
+  xcrun notarytool log "$sid" \
+    --key "$MACOS_NOTARY_KEY_FILE" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER" || true
+  echo "::error::notarization not Accepted for $bin (submission $sid)"; exit 1
 fi
+# A bare Mach-O can't be stapled; notarization is recorded against its cdhash and
+# verified online by Gatekeeper. (.app bundles are stapled by the macos-app-cask action.)
