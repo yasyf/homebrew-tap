@@ -109,10 +109,15 @@ jobs:
           go=.github/workflows/release-go.yml
           manifest_pin=bf445e75275fc12e276e06fc3b970a18f033b6d8
           publish_pin=9ca67392d45d66b6ae01e262383c8f3138d56f5e
+          immutable_pin=c70d7e51bdb512db2a73d054e3a94afe0a61eedb
           test "$(grep -Ec "actions/go-release-manifest@${manifest_pin}$" "$go")" = 1
           test "$(grep -Ec "actions/stage-draft-release@${stage_pin}$" "$go")" = 1
           test "$(grep -Ec "actions/publish-draft-release@${draft_pin}$" "$go")" = 1
+          test "$(grep -Ec "actions/publish-draft-release@${immutable_pin}$" "$go")" = 1
+          test "$(grep -Ec "actions/tap-delivery@${immutable_pin}$" "$go")" = 2
           test "$(grep -Ec "actions/publish@${publish_pin}$" "$go")" = 2
+          test "$(grep -Fc 'uses: actions/upload-artifact@v7' "$go")" = 1
+          test "$(grep -Fc 'uses: actions/download-artifact@v8' "$go")" = 1
           grep -Fq 'goreleaser release --clean --skip=publish' "$go"
           if grep -Fq 'name: Verify local release checksums' "$go"; then
             echo "::error::release-go must delegate checksum verification to the exact manifest action"
@@ -145,13 +150,32 @@ jobs:
           line() { grep -Fn "$1" "$go" | cut -d: -f1; }
           go_build="$(line 'name: Build release artifacts without publishing')"
           go_stage="$(line 'name: Stage and verify the complete draft release')"
+          go_bundle="$(line 'name: Package immutable release and Homebrew delivery')"
+          go_upload="$(line 'name: Upload immutable tap delivery')"
           go_publish="$(line 'name: Publish the verified release')"
-          generated_tap="$(line 'name: Publish the generated Homebrew delivery')"
-          rendered_tap="$(line 'name: Publish the rendered formula to the tap')"
           test "$go_build" -lt "$go_stage"
-          test "$go_stage" -lt "$go_publish"
-          test "$go_publish" -lt "$generated_tap"
-          test "$go_publish" -lt "$rendered_tap"
+          test "$go_stage" -lt "$go_bundle"
+          test "$go_bundle" -lt "$go_upload"
+          test "$go_upload" -lt "$go_publish"
+
+          release_block="$(sed -n '/^  release:/,/^  publish-tap:/p' "$go")"
+          tap_block="$(sed -n '/^  publish-tap:/,$p' "$go")"
+          grep -Fq 'goreleaser release --clean --skip=publish' <<< "$release_block"
+          grep -Fq 'needs: release' <<< "$tap_block"
+          grep -Fq 'require-published: "true"' <<< "$tap_block"
+          grep -Fq 'name: Reverify the exact immutable public release' <<< "$tap_block"
+          grep -Fq 'name: Publish the generated Homebrew delivery' <<< "$tap_block"
+          grep -Fq 'name: Publish the rendered formula to the tap' <<< "$tap_block"
+          if grep -Eq 'goreleaser|setup-go|setup-bun|setup-zig|Import Developer ID|MACOS_SIGN|MACOS_NOTARY|stage-draft-release' \
+            <<< "$tap_block"; then
+            echo "::error::tap-only retry path may not build, sign, notarize, or stage a release"
+            exit 1
+          fi
+          if grep -Eq 'Publish the generated Homebrew delivery|Publish the rendered formula to the tap' \
+            <<< "$release_block"; then
+            echo "::error::release job may not mutate the tap"
+            exit 1
+          fi
 
           bun=.github/workflows/release-bun.yml
           test "$(grep -Ec "actions/stage-draft-release@${stage_pin}$" "$bun")" = 1

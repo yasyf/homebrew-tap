@@ -1,7 +1,8 @@
-# The single reusable release workflow for every Go repo in the fleet. It owns the
-# whole job: verify-tag-on-main (or auto-tag), toolchain setup, Developer ID import,
-# artifact-only GoReleaser, exact draft staging, release-ID publication, and Homebrew
-# publication. Each repo's release.yml collapses to a `uses:` + a few `with:` inputs.
+# The single reusable release workflow for every Go repo in the fleet. Its release
+# job owns verify-tag-on-main (or auto-tag), toolchain setup, Developer ID import,
+# artifact-only GoReleaser, exact draft staging, immutable delivery packaging, and
+# release-ID publication. A separate tap job consumes only that preserved delivery,
+# so retrying a tap failure can never rebuild or re-sign release bytes.
 #
 # How a repo ships is decided by its in-repo .goreleaser.yaml plus these inputs:
 #   • cask (default): .goreleaser.yaml has a `homebrew_casks:` block. GoReleaser
@@ -79,6 +80,11 @@ concurrency:
 jobs:
   release:
     runs-on: ${{ inputs.runner }}
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+      release-id: ${{ steps.draft.outputs['release-id'] }}
+      tap-artifact-name: ${{ steps.tap-artifact.outputs.name }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -252,6 +258,7 @@ jobs:
           version: ${{ steps.tag.outputs.version }}
 
       - name: Verify Homebrew staging
+        id: homebrew
         if: ${{ steps.tag.outputs.prerelease == 'false' }}
         env:
           FORMULA_NAME: ${{ inputs.formula-name }}
@@ -282,6 +289,7 @@ jobs:
             echo "::error::Homebrew staging contains unclassified or missing files"
             exit 1
           }
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
       - name: Record the exact release asset manifest
         uses: yasyf/homebrew-tap/.github/actions/go-release-manifest@bf445e75275fc12e276e06fc3b970a18f033b6d8
@@ -299,6 +307,35 @@ jobs:
           title: ${{ steps.tag.outputs.tag }}
           prerelease: ${{ steps.tag.outputs.prerelease }}
 
+      - name: Package immutable release and Homebrew delivery
+        if: ${{ steps.tag.outputs.prerelease == 'false' }}
+        uses: yasyf/homebrew-tap/.github/actions/tap-delivery@c70d7e51bdb512db2a73d054e3a94afe0a61eedb
+        with:
+          mode: pack
+          bundle: ${{ runner.temp }}/tap-delivery
+          release-dir: ${{ steps.draft.outputs['download-dir'] }}
+          tap-dir: ${{ steps.homebrew.outputs.dir }}
+          repository: ${{ github.repository }}
+          source-sha: ${{ github.sha }}
+          tag: ${{ steps.tag.outputs.tag }}
+          release-id: ${{ steps.draft.outputs['release-id'] }}
+          run-id: ${{ github.run_id }}
+
+      - name: Resolve immutable delivery artifact name
+        if: ${{ steps.tag.outputs.prerelease == 'false' }}
+        id: tap-artifact
+        run: echo "name=tap-delivery-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload immutable tap delivery
+        if: ${{ steps.tag.outputs.prerelease == 'false' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.tap-artifact.outputs.name }}
+          path: ${{ runner.temp }}/tap-delivery
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 0
+
       - name: Publish the verified release
         uses: yasyf/homebrew-tap/.github/actions/publish-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5
         with:
@@ -309,18 +346,61 @@ jobs:
           prerelease: ${{ steps.tag.outputs.prerelease }}
           make-latest: ${{ steps.tag.outputs.prerelease == 'false' }}
 
+  publish-tap:
+    needs: release
+    if: ${{ needs.release.outputs.prerelease == 'false' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download immutable tap delivery
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.release.outputs.tap-artifact-name }}
+          path: ${{ runner.temp }}/tap-delivery
+
+      - name: Verify immutable delivery provenance and bytes
+        uses: yasyf/homebrew-tap/.github/actions/tap-delivery@c70d7e51bdb512db2a73d054e3a94afe0a61eedb
+        with:
+          mode: verify
+          bundle: ${{ runner.temp }}/tap-delivery
+          repository: ${{ github.repository }}
+          source-sha: ${{ github.sha }}
+          tag: ${{ needs.release.outputs.tag }}
+          release-id: ${{ needs.release.outputs.release-id }}
+          run-id: ${{ github.run_id }}
+
+      - name: Resolve exact preserved release manifest
+        run: |
+          set -euo pipefail
+          find "$RUNNER_TEMP/tap-delivery/release-assets" -mindepth 1 -maxdepth 1 -type f -print \
+            | LC_ALL=C sort > "$RUNNER_TEMP/tap-release-assets"
+          test -s "$RUNNER_TEMP/tap-release-assets" || {
+            echo "::error::immutable release manifest is empty"
+            exit 1
+          }
+
+      - name: Reverify the exact immutable public release
+        uses: yasyf/homebrew-tap/.github/actions/publish-draft-release@c70d7e51bdb512db2a73d054e3a94afe0a61eedb
+        with:
+          token: ${{ github.token }}
+          release-id: ${{ needs.release.outputs.release-id }}
+          tag: ${{ needs.release.outputs.tag }}
+          manifest: ${{ runner.temp }}/tap-release-assets
+          prerelease: "false"
+          make-latest: "true"
+          require-published: "true"
+
       - name: Publish the generated Homebrew delivery
-        if: ${{ !inputs.render-formula && steps.tag.outputs.prerelease == 'false' }}
+        if: ${{ !inputs.render-formula }}
         uses: yasyf/homebrew-tap/.github/actions/publish@9ca67392d45d66b6ae01e262383c8f3138d56f5e
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          dir: dist/homebrew
-          message: "${{ github.event.repository.name }} ${{ steps.tag.outputs.tag }}"
+          dir: ${{ runner.temp }}/tap-delivery/tap
+          message: "${{ github.event.repository.name }} ${{ needs.release.outputs.tag }}"
 
       - name: Publish the rendered formula to the tap
-        if: ${{ inputs.render-formula && steps.tag.outputs.prerelease == 'false' }}
+        if: ${{ inputs.render-formula }}
         uses: yasyf/homebrew-tap/.github/actions/publish@9ca67392d45d66b6ae01e262383c8f3138d56f5e
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          dir: tap-staging
-          message: "${{ inputs.formula-name }} ${{ steps.tag.outputs.tag }}"
+          dir: ${{ runner.temp }}/tap-delivery/tap
+          message: "${{ inputs.formula-name }} ${{ needs.release.outputs.tag }}"
