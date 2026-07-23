@@ -1,6 +1,7 @@
-# Reusable release workflow for a real Xcode-built macOS application, including
+# Reusable staging workflow for a real Xcode-built macOS application, including
 # applications that embed app extensions. Xcode signs every target with its own
-# entitlements; the shared app action only notarizes, staples, and packages.
+# entitlements; this workflow notarizes, staples, packages, and uploads one
+# verified Actions artifact. The caller alone owns its GitHub Release.
 
 name: release-app (reusable)
 
@@ -86,13 +87,13 @@ on:
         description: workflow artifact containing the verified zip and checksum
         value: ${{ jobs.release.outputs.artifact_name }}
       asset_filename:
-        description: exact verified GitHub release asset filename
+        description: exact verified filename the caller must publish
         value: ${{ jobs.release.outputs.asset_filename }}
       asset_url:
-        description: exact verified GitHub release asset URL
+        description: canonical GitHub release asset URL the caller must publish
         value: ${{ jobs.release.outputs.asset_url }}
       sha256:
-        description: SHA-256 of the verified GitHub release asset
+        description: SHA-256 of the verified staged application artifact
         value: ${{ jobs.release.outputs.sha256 }}
     secrets:
       MACOS_SIGN_P12:
@@ -225,7 +226,7 @@ jobs:
     if: ${{ needs.preflight.outputs.changed == 'true' }}
     runs-on: macos-15
     permissions:
-      contents: write
+      contents: read
     outputs:
       artifact_name: ${{ steps.artifact.outputs.artifact_name }}
       asset_filename: ${{ steps.artifact.outputs.asset_filename }}
@@ -737,7 +738,7 @@ jobs:
           done <<< "$PROFILE_NAMES"
           xcrun stapler validate "$APP"
 
-      - name: Record the exact verified application artifact
+      - name: Record the exact verified staged application artifact
         id: artifact
         env:
           ASSET_NAME: ${{ inputs.asset_name }}
@@ -751,7 +752,7 @@ jobs:
           (cd dist && shasum -a 256 -c "${ZIP##*/}.sha256")
           actual_sha="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
           [ "$actual_sha" = "$PACKAGE_SHA256" ] \
-            || { echo "::error::verified asset SHA changed before publication"; exit 1; }
+            || { echo "::error::verified asset SHA changed before staging"; exit 1; }
           filename="$(basename "$ZIP")"
           {
             echo "artifact_name=release-app-${ASSET_NAME}"
@@ -759,15 +760,6 @@ jobs:
             echo "asset_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${filename}"
             echo "sha256=$actual_sha"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Attach the verified application artifact to the GitHub release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            ${{ steps.package.outputs.zip }}
-            ${{ steps.package.outputs.zip }}.sha256
-          generate_release_notes: false
-          prerelease: ${{ needs.preflight.outputs.stable != 'true' }}
 
       - name: Upload the verified application artifact for the caller
         uses: actions/upload-artifact@v7

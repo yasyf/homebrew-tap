@@ -46,6 +46,23 @@ jobs:
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
 
+  release-app-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require caller-owned application release publication
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/release-app.yml
+          grep -Fq 'permissions:' "$workflow"
+          grep -Fq 'contents: read' "$workflow"
+          grep -Fq 'uses: actions/upload-artifact@v7' "$workflow"
+          grep -Fq "artifact_name=release-app-\${ASSET_NAME}" "$workflow"
+          if grep -Eq 'softprops/action-gh-release|gh release|contents: write' "$workflow"; then
+            echo "::error::release-app must stage an Actions artifact without mutating a GitHub Release"
+            exit 1
+          fi
+
   shellcheck:
     runs-on: ubuntu-latest
     steps:

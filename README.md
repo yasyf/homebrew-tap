@@ -62,6 +62,12 @@ jobs:
     secrets: inherit
 ```
 
+Composed Xcode application releases use `release-app.yml`. It builds, signs,
+notarizes, and uploads one verified Actions artifact with its exact filename,
+destination URL, and SHA-256 as outputs. It never creates, edits, or publishes a
+GitHub Release: the caller owns its draft, assembles the complete release set,
+and performs the sole transition from draft to public after every gate passes.
+
 **Composite actions** — for repos that need a macOS runner (cgo native clang, `lipo`, an
 Xcode `.app`) and compose their own workflow:
 
