@@ -1,5 +1,5 @@
 name: Stage an exact draft release
-description: Resolve one release identity, stage exact assets, and verify downloaded bytes without publishing.
+description: Bind one exact release ID, recover lost creates, stage exact assets, and verify bytes.
 
 inputs:
   token:

@@ -379,6 +379,68 @@ jobs:
             dist/artifacts.json "$RUNNER_TEMP/real-release-assets"
           test "$(wc -l < "$RUNNER_TEMP/real-release-assets" | tr -d ' ')" = 3
 
+  stage-draft-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise exact-ID creation and bounded recovery
+        run: |
+          set -euo pipefail
+          fake_bin="$RUNNER_TEMP/fake-gh-bin"
+          mkdir -p "$fake_bin"
+          cp .github/test-fixtures/fake-gh-release.py "$fake_bin/gh"
+          chmod +x "$fake_bin/gh"
+          printf 'release bytes\n' > "$RUNNER_TEMP/tool.tar.gz"
+          printf '%s\n' "$RUNNER_TEMP/tool.tar.gz" > "$RUNNER_TEMP/assets"
+
+          run_stage() {
+            scenario="$1"
+            runtime="$RUNNER_TEMP/stage-$scenario"
+            mkdir -p "$runtime"
+            env \
+              PATH="$fake_bin:$PATH" \
+              FAKE_GH_SCENARIO="$scenario" \
+              FAKE_GH_STATE="$runtime/fake-state" \
+              GH_TOKEN=test \
+              GITHUB_REPOSITORY=example/project \
+              RELEASE_TAG=v1.2.3 \
+              ASSET_MANIFEST="$RUNNER_TEMP/assets" \
+              RELEASE_TITLE=v1.2.3 \
+              RELEASE_PRERELEASE=false \
+              RELEASE_RECOVERY_ATTEMPTS=3 \
+              RELEASE_RECOVERY_DELAY_SECONDS=0 \
+              RUNNER_TEMP="$runtime" \
+              GITHUB_OUTPUT="$runtime/outputs" \
+              bash .github/actions/stage-draft-release/stage.sh
+          }
+
+          run_stage delayed-list
+          grep -Fxq 'release_id=101' "$RUNNER_TEMP/stage-delayed-list/outputs"
+          test "$(jq -r .list_calls "$RUNNER_TEMP/stage-delayed-list/fake-state/state.json")" = 1
+          cmp "$RUNNER_TEMP/tool.tar.gz" "$RUNNER_TEMP/stage-delayed-list/exact-release-101/tool.tar.gz"
+
+          run_stage lost-response
+          grep -Fxq 'release_id=102' "$RUNNER_TEMP/stage-lost-response/outputs"
+          test "$(jq -r .list_calls "$RUNNER_TEMP/stage-lost-response/fake-state/state.json")" = 3
+          cmp "$RUNNER_TEMP/tool.tar.gz" "$RUNNER_TEMP/stage-lost-response/exact-release-102/tool.tar.gz"
+
+          run_stage ambiguous-response
+          grep -Fxq 'release_id=106' "$RUNNER_TEMP/stage-ambiguous-response/outputs"
+          test "$(jq -r .list_calls "$RUNNER_TEMP/stage-ambiguous-response/fake-state/state.json")" = 2
+          cmp "$RUNNER_TEMP/tool.tar.gz" "$RUNNER_TEMP/stage-ambiguous-response/exact-release-106/tool.tar.gz"
+
+          if run_stage duplicate; then
+            echo "::error::duplicate recovery release was accepted"
+            exit 1
+          fi
+          test "$(jq -r '.assets | length' "$RUNNER_TEMP/stage-duplicate/fake-state/state.json")" = 0
+
+          if run_stage public-conflict; then
+            echo "::error::public release conflict was accepted after a lost create response"
+            exit 1
+          fi
+          test "$(jq -r '.assets | length' "$RUNNER_TEMP/stage-public-conflict/fake-state/state.json")" = 0
+
   inline-shell:
     runs-on: ubuntu-latest
     steps:

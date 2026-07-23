@@ -6,19 +6,45 @@ fail() {
   exit 1
 }
 
-assert_unique_release() {
-  expected_id="$1"
-  expected_draft="$2"
-  current="$RUNNER_TEMP/current-release-matches"
-  gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-    | jq -r --arg tag "$RELEASE_TAG" \
-        '.[] | select(.tag_name == $tag) | [.id, .draft] | @tsv' \
-        > "$current"
-  [ "$(wc -l < "$current" | tr -d ' ')" = 1 ] \
-    || fail "tag $RELEASE_TAG does not resolve to exactly one release"
-  IFS=$'\t' read -r current_id current_draft < "$current"
-  [ "$current_id" = "$expected_id" ] || fail "release identity changed"
-  [ "$current_draft" = "$expected_draft" ] || fail "release draft state changed"
+load_release_state() {
+  local release_id="$1" expected_draft="$2" output="$3"
+  gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > "$output" \
+    || fail "release $release_id cannot be read by exact ID"
+  [ "$(jq -r .id "$output")" = "$release_id" ] || fail "release identity changed"
+  [ "$(jq -r .tag_name "$output")" = "$RELEASE_TAG" ] || fail "release ID changed tag"
+  [ "$(jq -r .draft "$output")" = "$expected_draft" ] || fail "release draft state changed"
+  [ "$(jq -r .prerelease "$output")" = "$RELEASE_PRERELEASE" ] \
+    || fail "release prerelease state changed"
+}
+
+recover_created_release() {
+  local attempt=1
+  local recovered="$RUNNER_TEMP/recovered-release-matches"
+  local count recovered_id recovered_draft recovered_prerelease
+  while [ "$attempt" -le "$RELEASE_RECOVERY_ATTEMPTS" ]; do
+    if gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+      | jq -r --arg tag "$RELEASE_TAG" \
+          '.[] | select(.tag_name == $tag) | [.id, .draft, .prerelease] | @tsv' \
+          > "$recovered"; then
+      count="$(wc -l < "$recovered" | tr -d ' ')"
+      [ "$count" -le 1 ] || fail "tag $RELEASE_TAG resolves to multiple releases during recovery"
+      if [ "$count" = 1 ]; then
+        IFS=$'\t' read -r recovered_id recovered_draft recovered_prerelease < "$recovered"
+        [[ "$recovered_id" =~ ^[0-9]+$ ]] || fail "recovered release ID is not numeric"
+        [ "$recovered_prerelease" = "$RELEASE_PRERELEASE" ] \
+          || fail "recovered release prerelease state conflicts with the request"
+        [ "$recovered_draft" = true ] \
+          || fail "public release conflicts with lost create response for tag $RELEASE_TAG"
+        printf '%s\n' "$recovered_id"
+        return 0
+      fi
+    fi
+    if [ "$attempt" -lt "$RELEASE_RECOVERY_ATTEMPTS" ]; then
+      sleep "$RELEASE_RECOVERY_DELAY_SECONDS"
+    fi
+    attempt=$((attempt + 1))
+  done
+  fail "lost create response for tag $RELEASE_TAG could not be recovered"
 }
 
 test -n "${GH_TOKEN:-}" || fail "token is required"
@@ -29,6 +55,12 @@ case "${RELEASE_PRERELEASE:-}" in
   true|false) ;;
   *) fail "prerelease must be true or false" ;;
 esac
+RELEASE_RECOVERY_ATTEMPTS="${RELEASE_RECOVERY_ATTEMPTS:-6}"
+RELEASE_RECOVERY_DELAY_SECONDS="${RELEASE_RECOVERY_DELAY_SECONDS:-1}"
+[[ "$RELEASE_RECOVERY_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] \
+  || fail "release recovery attempts must be a positive integer"
+[[ "$RELEASE_RECOVERY_DELAY_SECONDS" =~ ^[0-9]+$ ]] \
+  || fail "release recovery delay must be a non-negative integer"
 
 assets=()
 names="$RUNNER_TEMP/release-asset-names"
@@ -64,10 +96,16 @@ if [ "$count" = 0 ]; then
     '{tag_name: $tag, name: $title, draft: true, prerelease: $prerelease, generate_release_notes: true}' \
     > "$payload"
   created="$RUNNER_TEMP/created-release.json"
-  gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" --input "$payload" > "$created"
-  release_id="$(jq -r .id "$created")"
+  create_succeeded=false
+  if gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" --input "$payload" > "$created"; then
+    create_succeeded=true
+  fi
+  release_id="$(jq -er '.id | select(type == "number") | tostring' "$created" 2>/dev/null || true)"
+  if [ "$create_succeeded" != true ] || [[ ! "$release_id" =~ ^[0-9]+$ ]]; then
+    release_id="$(recover_created_release)"
+  fi
   draft=true
-  prerelease="$(jq -r .prerelease "$created")"
+  prerelease="$RELEASE_PRERELEASE"
 else
   IFS=$'\t' read -r release_id draft prerelease < "$matches"
 fi
@@ -77,13 +115,10 @@ fi
   || fail "release $release_id prerelease state does not match the requested state"
 
 state="$RUNNER_TEMP/release-state.json"
-gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > "$state"
-[ "$(jq -r .tag_name "$state")" = "$RELEASE_TAG" ] || fail "release ID changed tag"
-[ "$(jq -r .draft "$state")" = "$draft" ] || fail "release draft state changed"
-assert_unique_release "$release_id" "$draft"
+load_release_state "$release_id" "$draft" "$state"
 
 if [ "$draft" = true ]; then
-  assert_unique_release "$release_id" true
+  load_release_state "$release_id" true "$state"
   upload_url="$(jq -r '.upload_url | sub("\\{.*$"; "")' "$state")"
   [[ "$upload_url" == https://uploads.github.com/* ]] || fail "release upload URL is invalid"
   asset_ids="$RUNNER_TEMP/release-asset-ids"
@@ -91,12 +126,12 @@ if [ "$draft" = true ]; then
     | jq -r '.[].id' > "$asset_ids"
   while IFS= read -r asset_id || [ -n "$asset_id" ]; do
     [ -n "$asset_id" ] || continue
-    assert_unique_release "$release_id" true
+    load_release_state "$release_id" true "$state"
     gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
   done < "$asset_ids"
 
   for asset in "${assets[@]}"; do
-    assert_unique_release "$release_id" true
+    load_release_state "$release_id" true "$state"
     name="$(basename "$asset")"
     encoded="$(jq -rn --arg value "$name" '$value | @uri')"
     gh api --method POST \
