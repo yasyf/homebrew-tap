@@ -64,4 +64,14 @@ runs:
           exit 0
         fi
         git commit -m "$PUBLISH_MSG"
-        git push
+        for attempt in 1 2 3; do
+          if git push; then
+            exit 0
+          fi
+          if [ "$attempt" -eq 3 ]; then
+            echo "::error::tap push lost three concurrent-update races"
+            exit 1
+          fi
+          git fetch origin main
+          git rebase origin/main
+        done

@@ -86,6 +86,14 @@ jobs:
             echo "::error::shared release workflows must pin homebrew-tap actions by exact commit"
             exit 1
           fi
+          while IFS= read -r ref; do
+            [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "::error::internal release action ref '$ref' is not an exact commit"
+              exit 1
+            }
+          done < <(sed -nE 's|^[[:space:]-]*uses:[[:space:]]+yasyf/homebrew-tap/.+@([^[:space:]]+)$|\1|p' \
+            .github/workflows/release-*.yml)
+          grep -Fq 'git rebase origin/main' .github/actions/publish/action.yml
           stage=.github/actions/stage-draft-release/stage.sh
           publish=.github/actions/publish-draft-release/publish.sh
           grep -Fq -- "--paginate \"repos/\${GITHUB_REPOSITORY}/releases?per_page=100\"" "$stage"
