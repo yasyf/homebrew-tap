@@ -20,12 +20,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Reject the retired standalone FuseKit holder
+      - name: Reject retired standalone FuseKit holders
         run: |
           set -euo pipefail
           test ! -e Casks/fusekit-holder.rb
-          if grep -RInE 'fusekit-holder|com\.yasyf\.fusekit-holder' Casks Formula; then
-            echo "::error::the retired standalone FuseKit holder returned to the tap"
+          test ! -e Casks/cc-notes-holder.rb
+          if grep -RInE 'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app' Casks Formula; then
+            echo "::error::a retired standalone FuseKit holder returned to the tap"
             exit 1
           fi
 
