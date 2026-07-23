@@ -20,6 +20,13 @@ inputs:
   message:
     description: Commit message for the tap.
     required: true
+  delete-file:
+    description: >-
+      Optional exact tap-relative tracked file to delete in the same commit as
+      the staged publish, e.g. Casks/old-name.rb. Absolute paths, traversal,
+      globs, directories, and untracked files are rejected.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -36,27 +43,15 @@ runs:
       env:
         PUBLISH_DIR: ${{ inputs.dir }}
         PUBLISH_MSG: ${{ inputs.message }}
+        DELETE_FILE: ${{ inputs.delete-file }}
       run: |
         set -euo pipefail
         [ -d "$PUBLISH_DIR" ] || { echo "::error::publish dir '$PUBLISH_DIR' does not exist"; exit 1; }
-        if [ -e "$PUBLISH_DIR/Casks/fusekit-holder.rb" ] || \
-           [ -e "$PUBLISH_DIR/Casks/cc-notes-holder.rb" ] || \
-           [ -e "$PUBLISH_DIR/Casks/cc-notes-helper.rb" ] || \
-           grep -RIlE 'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app|cc-notes-helper|com\.yasyf\.cc-notes\.helper|CCNotesHelper\.app' \
-             "$PUBLISH_DIR/Casks" "$PUBLISH_DIR/Formula" 2>/dev/null | grep -q .; then
-          echo "::error::refusing to publish a standalone FuseKit runtime app"
-          exit 1
-        fi
+        "$GITHUB_ACTION_PATH/reject-retired-surfaces.sh" "$PUBLISH_DIR"
         # Merge the staged Formula//Casks/ files into the tap working tree.
         cp -R "$PUBLISH_DIR"/. .tap-publish/
-        if [ -e .tap-publish/Casks/fusekit-holder.rb ] || \
-           [ -e .tap-publish/Casks/cc-notes-holder.rb ] || \
-           [ -e .tap-publish/Casks/cc-notes-helper.rb ] || \
-           grep -RIlE 'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app|cc-notes-helper|com\.yasyf\.cc-notes\.helper|CCNotesHelper\.app' \
-             .tap-publish/Casks .tap-publish/Formula 2>/dev/null | grep -q .; then
-          echo "::error::a standalone FuseKit runtime app exists in the merged tap"
-          exit 1
-        fi
+        "$GITHUB_ACTION_PATH/delete-exact-file.sh" .tap-publish "$DELETE_FILE"
+        "$GITHUB_ACTION_PATH/reject-retired-surfaces.sh" .tap-publish
         cd .tap-publish
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"

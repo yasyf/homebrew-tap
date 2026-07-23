@@ -56,6 +56,8 @@ jobs:
           checked=(
             .github/actions/import-developer-id/macos-codesign.sh
             .github/actions/prepare-app-build/prepare.sh
+            .github/actions/publish/delete-exact-file.sh
+            .github/actions/publish/reject-retired-surfaces.sh
             .github/test-fixtures/prebuild-hook.sh
           )
           shellcheck "${checked[@]}"
@@ -88,6 +90,79 @@ jobs:
           # must flow via `env:`, never be interpolated into a run block, so an
           # interpolation artifact tripping SC2296 is a real finding, not noise.
           shellcheck -s bash -e SC2129 "$RUNNER_TEMP/inline-shell"/*.sh
+
+  publish-delete-file:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise exact tracked-file deletion
+        run: |
+          set -euo pipefail
+          script="$GITHUB_WORKSPACE/.github/actions/publish/delete-exact-file.sh"
+          guard="$GITHUB_WORKSPACE/.github/actions/publish/reject-retired-surfaces.sh"
+          tap="$RUNNER_TEMP/delete-file-tap"
+          git init -q "$tap"
+          git -C "$tap" config user.name test
+          git -C "$tap" config user.email test@example.invalid
+          mkdir -p "$tap/Casks" "$tap/Formula"
+          printf 'cask "cc-pool-status" do\n  app "CCPoolStatus.app"\nend\n' > "$tap/Casks/cc-pool-status.rb"
+          printf 'keep\n' > "$tap/Casks/keep.rb"
+          printf 'formula\n' > "$tap/Formula/new.rb"
+          git -C "$tap" add Casks Formula
+          git -C "$tap" commit -qm fixture
+
+          "$script" "$tap" ""
+          git -C "$tap" diff --cached --quiet
+          if "$guard" "$tap"; then
+            echo "::error::omitting delete-file left CCPoolStatus publishable"
+            exit 1
+          fi
+
+          expect_failure() {
+            path=$1
+            message=$2
+            if output=$("$script" "$tap" "$path" 2>&1); then
+              echo "::error::delete-file unexpectedly accepted '$path'"
+              exit 1
+            fi
+            grep -Fq "$message" <<<"$output" \
+              || { echo "::error::unexpected failure for '$path': $output"; exit 1; }
+            [ -f "$tap/Casks/cc-pool-status.rb" ]
+            git -C "$tap" diff --cached --quiet
+          }
+
+          expect_failure /tmp/cc-pool-status.rb "must be relative to the tap root"
+          expect_failure C:/tmp/cc-pool-status.rb "must be relative to the tap root"
+          expect_failure Casks/../Formula/new.rb "must not contain traversal"
+          expect_failure 'Casks/*.rb' "must not contain glob syntax"
+          expect_failure Casks "must name a file, not a directory"
+          printf 'untracked\n' > "$tap/Casks/untracked.rb"
+          expect_failure Casks/untracked.rb "is not an exact tracked file"
+          expect_failure Casks/missing.rb "does not exist"
+          expect_failure ./Casks/cc-pool-status.rb "must be a canonical tap-relative path"
+
+          "$script" "$tap" Casks/cc-pool-status.rb
+          [ ! -e "$tap/Casks/cc-pool-status.rb" ]
+          [ -f "$tap/Casks/keep.rb" ]
+          [ -f "$tap/Formula/new.rb" ]
+          [ -f "$tap/Casks/untracked.rb" ]
+          [ "$(git -C "$tap" diff --cached --name-status)" = $'D\tCasks/cc-pool-status.rb' ]
+          "$guard" "$tap"
+
+          staged="$RUNNER_TEMP/retired-staging"
+          mkdir -p "$staged/Casks" "$staged/Formula"
+          "$guard" "$staged"
+          printf 'cask "renamed" do\n  app "CCPoolStatus.app"\nend\n' > "$staged/Casks/renamed.rb"
+          if "$guard" "$staged"; then
+            echo "::error::retired CCPoolStatus cask content passed the staged guard"
+            exit 1
+          fi
+          rm "$staged/Casks/renamed.rb"
+          touch "$staged/Casks/cc-pool-status.rb"
+          if "$guard" "$staged"; then
+            echo "::error::retired cc-pool-status path passed the staged guard"
+            exit 1
+          fi
 
   exercise:
     strategy:
