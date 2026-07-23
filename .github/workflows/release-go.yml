@@ -83,7 +83,7 @@ jobs:
 
       - name: Verify the tag is on main
         if: ${{ !inputs.auto-tag }}
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@v1
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           plugin-manifest: ${{ inputs.plugin-manifest }}
 
@@ -164,7 +164,7 @@ jobs:
       - name: Import Developer ID certificate
         if: ${{ inputs.signer == 'codesign' }}
         id: developer-id
-        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@v1
+        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           p12: ${{ secrets.MACOS_SIGN_P12 }}
           p12-password: ${{ secrets.MACOS_SIGN_PASSWORD }}
@@ -233,7 +233,7 @@ jobs:
 
       - name: Render the formula
         if: ${{ inputs.render-formula }}
-        uses: yasyf/homebrew-tap/.github/actions/render-formula@v1
+        uses: yasyf/homebrew-tap/.github/actions/render-formula@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           template: ${{ inputs.formula-template }}
           name: ${{ inputs.formula-name }}
@@ -241,7 +241,7 @@ jobs:
 
       - name: Publish the formula to the tap
         if: ${{ inputs.render-formula }}
-        uses: yasyf/homebrew-tap/.github/actions/publish@v2
+        uses: yasyf/homebrew-tap/.github/actions/publish@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           dir: tap-staging

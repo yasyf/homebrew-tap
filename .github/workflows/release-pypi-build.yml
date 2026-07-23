@@ -96,7 +96,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@v1
+      - uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
 
   build:
     # Pure uv_build path. Runs when the gate succeeded (tag mode) or was skipped (auto-tag).

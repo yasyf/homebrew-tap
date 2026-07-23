@@ -77,6 +77,11 @@ jobs:
           grep -Fq "gh release upload \"\$TAG\"" "$swift"
           grep -Fq "gh release edit \"\$TAG\"" "$swift"
           grep -Fq -- '--draft=false' "$swift"
+          if grep -RInE '^[[:space:]-]*uses:[[:space:]]+yasyf/homebrew-tap/.+@(v[0-9]+|[a-z]+-v[0-9]+|main)$' \
+            .github/workflows/release-*.yml; then
+            echo "::error::shared release workflows must pin homebrew-tap actions by exact commit"
+            exit 1
+          fi
 
   shellcheck:
     runs-on: ubuntu-latest

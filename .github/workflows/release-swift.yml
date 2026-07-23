@@ -86,7 +86,7 @@ jobs:
 
       - name: Verify the tag is on main
         if: ${{ !inputs.auto-tag }}
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@swift-v1
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
 
       - name: Resolve the release tag
         id: tag
@@ -153,7 +153,7 @@ jobs:
         run: ${{ inputs.pre-build }}
 
       - name: Import Developer ID certificate
-        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@swift-v1
+        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           p12: ${{ secrets.MACOS_SIGN_P12 }}
           p12-password: ${{ secrets.MACOS_SIGN_PASSWORD }}
@@ -172,14 +172,14 @@ jobs:
 
       - name: Build the universal binary
         id: build
-        uses: yasyf/homebrew-tap/.github/actions/build-swift-universal@swift-v1
+        uses: yasyf/homebrew-tap/.github/actions/build-swift-universal@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           product: ${{ inputs.product }}
           package-path: ${{ inputs.package-path }}
 
       - name: Sign, notarize, and package
         id: pkg
-        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-binary@swift-v1
+        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-binary@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           binary: ${{ steps.build.outputs.binary }}
           name: ${{ inputs.product }}
@@ -255,7 +255,7 @@ jobs:
 
       - name: Render the cask
         if: ${{ !contains(steps.tag.outputs.tag, '-') }}
-        uses: yasyf/homebrew-tap/.github/actions/render-formula@swift-v1
+        uses: yasyf/homebrew-tap/.github/actions/render-formula@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           template: ${{ runner.temp }}/cask.rb.tmpl
           output: Casks/${{ inputs.product }}.rb
@@ -332,7 +332,7 @@ jobs:
 
       - name: Publish the cask to the tap
         if: ${{ !contains(steps.tag.outputs.tag, '-') }}
-        uses: yasyf/homebrew-tap/.github/actions/publish@swift-v1
+        uses: yasyf/homebrew-tap/.github/actions/publish@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           dir: tap-staging

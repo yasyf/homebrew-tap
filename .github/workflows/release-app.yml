@@ -121,7 +121,7 @@ jobs:
           fetch-depth: 0
 
       - name: Validate caller build dependencies
-        uses: yasyf/homebrew-tap/.github/actions/prepare-app-build@fb4f471718f99cbfd627192e8c3f76c620e24be4
+        uses: yasyf/homebrew-tap/.github/actions/prepare-app-build@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           go-version: ${{ inputs.go_version }}
           go-cache-dependency-path: ${{ inputs.go_cache_dependency_path }}
@@ -130,7 +130,7 @@ jobs:
           validate-only: "true"
 
       - name: Verify the tag is on main
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@b6c1154d3d92dd3fb6e3c338bf8e38ac92656e89
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
 
       - name: Validate release inputs and apply the change gate
         id: gate
@@ -269,7 +269,7 @@ jobs:
           require_secret "$MACOS_NOTARY_ISSUER_ID" MACOS_NOTARY_ISSUER_ID
 
       - name: Import Developer ID certificate
-        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@b6c1154d3d92dd3fb6e3c338bf8e38ac92656e89
+        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           p12: ${{ secrets.MACOS_SIGN_P12 }}
           p12-password: ${{ secrets.MACOS_SIGN_PASSWORD }}
@@ -283,7 +283,7 @@ jobs:
           xcode-version: ${{ inputs.xcode_version }}
 
       - name: Prepare caller build dependencies
-        uses: yasyf/homebrew-tap/.github/actions/prepare-app-build@fb4f471718f99cbfd627192e8c3f76c620e24be4
+        uses: yasyf/homebrew-tap/.github/actions/prepare-app-build@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           go-version: ${{ inputs.go_version }}
           go-cache-dependency-path: ${{ inputs.go_cache_dependency_path }}
@@ -567,7 +567,7 @@ jobs:
       # of a completed non-Accepted submission.
       - name: Notarize, staple, and package the Xcode-signed application
         id: package
-        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-app@1666a5363ad6f2ed7ac0be901702e523cc1fba66
+        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-app@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           app: ${{ steps.project.outputs.app }}
           name: ${{ steps.project.outputs.asset-name }}
