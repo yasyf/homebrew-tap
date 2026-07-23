@@ -130,6 +130,37 @@ jobs:
           test "$go_publish" -lt "$generated_tap"
           test "$go_publish" -lt "$rendered_tap"
 
+          bun=.github/workflows/release-bun.yml
+          test "$(grep -Ec "actions/stage-draft-release@${draft_pin}$" "$bun")" = 1
+          test "$(grep -Ec "actions/publish-draft-release@${draft_pin}$" "$bun")" = 1
+          test "$(grep -Fc 'bun-release-assets' "$bun")" = 3
+          test "$(grep -Fc 'for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do' "$bun")" = 2
+          test "$(grep -Fc 'cancel-in-progress: false' "$bun")" = 1
+          bun_output_ref='release-id: $'
+          bun_output_ref+="{{ steps.draft.outputs['release-id'] }}"
+          grep -Fq "$bun_output_ref" "$bun"
+          bun_group='group: release-bun-$'
+          bun_group+="{{ github.repository }}-$"
+          bun_group+="{{ needs.setup.outputs.tag }}"
+          grep -Fq "$bun_group" "$bun"
+          bun_download='RELEASE_DIR: $'
+          bun_download+="{{ steps.draft.outputs['download-dir'] }}"
+          grep -Fq "$bun_download" "$bun"
+          grep -Fq "shasum -a 256 \"\$RELEASE_DIR/\${NAME}-\${TAG}-\$1.zip\"" "$bun"
+          if grep -Eq '/releases/tags/|gh release (view|upload|download|edit)|softprops/action-gh-release' "$bun"; then
+            echo "::error::release-bun must use the exact-ID draft actions"
+            exit 1
+          fi
+          bun_stage="$(grep -Fn 'name: Stage and verify the complete draft release' "$bun" | cut -d: -f1)"
+          bun_verify="$(grep -Fn 'name: Verify the exact staged release bytes' "$bun" | cut -d: -f1)"
+          bun_render="$(grep -Fn 'name: Render the cask' "$bun" | cut -d: -f1)"
+          bun_tap="$(grep -Fn 'name: Publish the cask to the tap' "$bun" | cut -d: -f1)"
+          bun_publish="$(grep -Fn 'name: Publish the verified release' "$bun" | cut -d: -f1)"
+          test "$bun_stage" -lt "$bun_verify"
+          test "$bun_verify" -lt "$bun_render"
+          test "$bun_render" -lt "$bun_tap"
+          test "$bun_tap" -lt "$bun_publish"
+
   shellcheck:
     runs-on: ubuntu-latest
     steps:

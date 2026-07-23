@@ -314,6 +314,9 @@ jobs:
 
   release:
     needs: [setup, build]
+    concurrency:
+      group: release-bun-${{ github.repository }}-${{ needs.setup.outputs.tag }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -347,18 +350,46 @@ jobs:
           set -euo pipefail
           (cd dist && shasum -a 256 -- *.zip > checksums.txt)
 
-      # Single release-creation point: signing actions only stage artifacts, so one
-      # caller-owned step controls the release, its notes, and the prerelease flag.
-      - name: Create the GitHub release
-        uses: softprops/action-gh-release@v3
+      - name: Record the exact release asset manifest
+        env:
+          NAME: ${{ inputs.name }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          set -euo pipefail
+          manifest="$RUNNER_TEMP/bun-release-assets"
+          : > "$manifest"
+          for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            zip="dist/${NAME}-${TAG}-${platform}.zip"
+            sidecar="${zip}.sha256"
+            test -f "$zip"
+            test -f "$sidecar"
+            printf '%s\n' "$zip" "$sidecar" >> "$manifest"
+          done
+          test -f dist/checksums.txt
+          printf '%s\n' dist/checksums.txt >> "$manifest"
+
+      - name: Stage and verify the complete draft release
+        id: draft
+        uses: yasyf/homebrew-tap/.github/actions/stage-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5
         with:
-          tag_name: ${{ needs.setup.outputs.tag }}
-          files: |
-            dist/*.zip
-            dist/*.zip.sha256
-            dist/checksums.txt
-          generate_release_notes: true
+          token: ${{ github.token }}
+          tag: ${{ needs.setup.outputs.tag }}
+          manifest: ${{ runner.temp }}/bun-release-assets
+          title: ${{ needs.setup.outputs.tag }}
           prerelease: ${{ contains(needs.setup.outputs.tag, '-') }}
+
+      - name: Verify the exact staged release bytes
+        env:
+          NAME: ${{ inputs.name }}
+          RELEASE_DIR: ${{ steps.draft.outputs['download-dir'] }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd "$RELEASE_DIR"
+          shasum -a 256 -c checksums.txt
+          for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            shasum -a 256 -c "${NAME}-${TAG}-${platform}.zip.sha256"
+          done
 
       # A hyphenated tag (v1.0.0-rc.1) publishes a PRERELEASE GitHub release; the cask
       # must not advance to it — brew has no prerelease channel, so publishing would
@@ -451,10 +482,11 @@ jobs:
         id: shas
         env:
           NAME: ${{ inputs.name }}
+          RELEASE_DIR: ${{ steps.draft.outputs['download-dir'] }}
           TAG: ${{ needs.setup.outputs.tag }}
         run: |
           set -euo pipefail
-          sha() { shasum -a 256 "dist/${NAME}-${TAG}-$1.zip" | awk '{print $1}'; }
+          sha() { shasum -a 256 "$RELEASE_DIR/${NAME}-${TAG}-$1.zip" | awk '{print $1}'; }
           {
             echo "darwin_arm64=$(sha darwin-arm64)"
             echo "darwin_x64=$(sha darwin-x64)"
@@ -489,3 +521,13 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           dir: tap-staging
           message: "${{ inputs.name }} ${{ needs.setup.outputs.tag }}"
+
+      - name: Publish the verified release
+        uses: yasyf/homebrew-tap/.github/actions/publish-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5
+        with:
+          token: ${{ github.token }}
+          release-id: ${{ steps.draft.outputs['release-id'] }}
+          tag: ${{ needs.setup.outputs.tag }}
+          manifest: ${{ runner.temp }}/bun-release-assets
+          prerelease: ${{ contains(needs.setup.outputs.tag, '-') }}
+          make-latest: ${{ !contains(needs.setup.outputs.tag, '-') }}
