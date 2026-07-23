@@ -104,6 +104,7 @@ jobs:
         run: |
           set -euo pipefail
           checked=(
+            .github/actions/go-release-manifest/manifest.sh
             .github/actions/import-developer-id/macos-codesign.sh
             .github/actions/prepare-app-build/prepare.sh
             .github/actions/publish-draft-release/publish.sh
@@ -118,6 +119,42 @@ jobs:
           # script can't dodge linting (a stale list entry fails too).
           diff <(printf '%s\n' "${checked[@]}" | sort) <(find .github -type f -name '*.sh' | sort) \
             || { echo "::error::.sh files under .github/ do not match the shellchecked list in test.yml (see diff above)"; exit 1; }
+
+  go-release-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create representative GoReleaser artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist/bin dist/homebrew/Casks
+          printf 'archive\n' > dist/tool_darwin_arm64.tar.gz
+          printf 'binary\n' > dist/bin/tool
+          printf 'cask\n' > dist/homebrew/Casks/tool.rb
+          sha256sum dist/tool_darwin_arm64.tar.gz > dist/checksums.txt
+          printf '{}\n' > dist/metadata.json
+          jq -n '[
+            {type:"Archive", name:"tool_darwin_arm64.tar.gz", path:"dist/tool_darwin_arm64.tar.gz"},
+            {type:"Checksum", name:"checksums.txt", path:"dist/checksums.txt"},
+            {type:"Binary", name:"tool", path:"dist/bin/tool"},
+            {type:"Homebrew Cask", name:"tool.rb", path:"dist/homebrew/Casks/tool.rb"},
+            {type:"Metadata", name:"metadata.json", path:"dist/metadata.json"}
+          ]' > dist/artifacts.json
+      - name: Classify the exact release manifest
+        uses: ./.github/actions/go-release-manifest
+        with:
+          output: ${{ runner.temp }}/release-assets
+      - name: Verify release and local artifact classes remain separate
+        run: |
+          set -euo pipefail
+          printf '%s\n' dist/checksums.txt dist/tool_darwin_arm64.tar.gz > "$RUNNER_TEMP/expected-assets"
+          diff -u "$RUNNER_TEMP/expected-assets" "$RUNNER_TEMP/release-assets"
+          jq '.[0].type = "Docker Image"' dist/artifacts.json > "$RUNNER_TEMP/unsupported.json"
+          if bash .github/actions/go-release-manifest/manifest.sh \
+            "$RUNNER_TEMP/unsupported.json" "$RUNNER_TEMP/unsupported-assets"; then
+            echo "::error::unsupported artifact class was accepted"
+            exit 1
+          fi
 
   inline-shell:
     runs-on: ubuntu-latest

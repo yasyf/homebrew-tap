@@ -1,0 +1,20 @@
+name: Classify GoReleaser release assets
+description: Build an exact manifest from supported GoReleaser artifact classes without publishing.
+
+inputs:
+  artifacts:
+    description: GoReleaser artifacts.json path
+    required: false
+    default: dist/artifacts.json
+  output:
+    description: Output manifest path
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        ARTIFACTS: ${{ inputs.artifacts }}
+        OUTPUT: ${{ inputs.output }}
+      run: bash "$GITHUB_ACTION_PATH/manifest.sh" "$ARTIFACTS" "$OUTPUT"
