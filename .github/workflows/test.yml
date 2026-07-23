@@ -70,6 +70,12 @@ jobs:
               exit 1
             fi
           done
+          swift=.github/workflows/release-swift.yml
+          grep -Fq "gh release create \"\$TAG\"" "$swift"
+          grep -Fq -- '--draft --generate-notes --verify-tag' "$swift"
+          grep -Fq "gh release upload \"\$TAG\"" "$swift"
+          grep -Fq "gh release edit \"\$TAG\"" "$swift"
+          grep -Fq -- '--draft=false' "$swift"
 
   shellcheck:
     runs-on: ubuntu-latest

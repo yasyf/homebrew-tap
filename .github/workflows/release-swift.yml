@@ -1,7 +1,7 @@
 # The single reusable release workflow for every Swift CLI in the fleet. goreleaser
 # has no Swift builder, so this workflow owns the whole job by hand: verify-tag-on-main
 # (or auto-tag), Xcode selection, Developer ID import, a universal `swift build`,
-# native codesign + notarytool, the GitHub release, and a rendered binary cask pushed
+# native codesign + notarytool, caller-owned GitHub release publication, and a rendered binary cask pushed
 # to this tap. Each repo's release.yml collapses to a `uses:` line; all the logic
 # lives here, pinned `@swift-v1` (release-swift.yml does not exist at `v1` — Swift
 # callers must pin the swift family).
@@ -177,7 +177,7 @@ jobs:
           product: ${{ inputs.product }}
           package-path: ${{ inputs.package-path }}
 
-      - name: Sign, notarize, package, release
+      - name: Sign, notarize, and package
         id: pkg
         uses: yasyf/homebrew-tap/.github/actions/sign-notarize-binary@swift-v1
         with:
@@ -267,6 +267,68 @@ jobs:
             __HOMEPAGE__=${{ steps.meta.outputs.homepage }}
             __REPO__=${{ github.repository }}
             __MACOS_FLOOR__=${{ inputs.macos-floor }}
+
+      - name: Stage and verify the complete draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          ZIP: ${{ steps.pkg.outputs.zip }}
+        run: |
+          set -euo pipefail
+          sidecar="${ZIP}.sha256"
+          test -f "$ZIP"
+          test -f "$sidecar"
+          test -f dist/checksums.txt
+
+          if state="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName 2>/dev/null)"; then
+            [ "$(jq -r .tagName <<<"$state")" = "$TAG" ]
+            [ "$(jq -r .isDraft <<<"$state")" = true ] || {
+              echo "::error::release $TAG is already public; refusing to mutate it"
+              exit 1
+            }
+          else
+            args=(--draft --generate-notes --verify-tag)
+            if [[ "$TAG" == *-* ]]; then
+              args+=(--prerelease)
+            fi
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${args[@]}"
+          fi
+
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            "$ZIP" "$sidecar" dist/checksums.txt
+
+          expected="$RUNNER_TEMP/expected-release-assets"
+          actual="$RUNNER_TEMP/actual-release-assets"
+          printf '%s\n' \
+            "$(basename "$ZIP")" \
+            "$(basename "$sidecar")" \
+            checksums.txt | sort > "$expected"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            --jq '.assets[].name' | sort > "$actual"
+          diff -u "$expected" "$actual" || {
+            echo "::error::draft release does not contain the exact staged asset set"
+            exit 1
+          }
+
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq .id)"
+          for asset in "$(basename "$ZIP")" "$(basename "$sidecar")" checksums.txt; do
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" \
+              --jq ".[] | select(.name == \"${asset}\") | .browser_download_url" \
+              | grep -Fq "/releases/download/${TAG}/${asset}"
+          done
+
+      - name: Publish the verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          prerelease=false
+          if [[ "$TAG" == *-* ]]; then
+            prerelease=true
+          fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --prerelease="$prerelease"
 
       - name: Publish the cask to the tap
         if: ${{ !contains(steps.tag.outputs.tag, '-') }}
