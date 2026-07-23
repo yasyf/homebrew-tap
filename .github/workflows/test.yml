@@ -96,6 +96,40 @@ jobs:
             exit 1
           fi
 
+          go=.github/workflows/release-go.yml
+          manifest_pin=eb73d87f6b53a71f49d846ec28756ea243970d45
+          draft_pin=54e3e194bda69896894a82c17fcdb2822beefab5
+          test "$(grep -Ec "actions/go-release-manifest@${manifest_pin}$" "$go")" = 1
+          test "$(grep -Ec "actions/stage-draft-release@${draft_pin}$" "$go")" = 1
+          test "$(grep -Ec "actions/publish-draft-release@${draft_pin}$" "$go")" = 1
+          grep -Fq 'goreleaser release --clean --skip=publish' "$go"
+          go_output_ref='release-id: $'
+          go_output_ref+="{{ steps.draft.outputs['release-id'] }}"
+          grep -Fq "$go_output_ref" "$go"
+          if grep -F 'goreleaser release ' "$go" | grep -Fv -- '--skip=publish'; then
+            echo "::error::release-go must never let GoReleaser publish"
+            exit 1
+          fi
+          if grep -Eq '/releases/tags/|gh release (view|upload|download|edit)|softprops/action-gh-release' "$go"; then
+            echo "::error::release-go must use the exact-ID draft actions"
+            exit 1
+          fi
+          build_block="$(sed -n '/name: Build release artifacts without publishing/,/name: Render the formula/p' "$go")"
+          if grep -Fq HOMEBREW_TAP_TOKEN <<< "$build_block"; then
+            echo "::error::GoReleaser must not receive a token capable of mutating the tap"
+            exit 1
+          fi
+          line() { grep -Fn "$1" "$go" | cut -d: -f1; }
+          go_build="$(line 'name: Build release artifacts without publishing')"
+          go_stage="$(line 'name: Stage and verify the complete draft release')"
+          go_publish="$(line 'name: Publish the verified release')"
+          generated_tap="$(line 'name: Publish the generated Homebrew delivery')"
+          rendered_tap="$(line 'name: Publish the rendered formula to the tap')"
+          test "$go_build" -lt "$go_stage"
+          test "$go_stage" -lt "$go_publish"
+          test "$go_publish" -lt "$generated_tap"
+          test "$go_publish" -lt "$rendered_tap"
+
   shellcheck:
     runs-on: ubuntu-latest
     steps:

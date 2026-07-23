@@ -1,22 +1,21 @@
 # The single reusable release workflow for every Go repo in the fleet. It owns the
 # whole job: verify-tag-on-main (or auto-tag), toolchain setup, Developer ID import,
-# `goreleaser release`, and — for the rich-formula repos goreleaser's brews block
-# can't express — render-formula + publish. Each repo's release.yml collapses to a
-# `uses:` + a few `with:` inputs; all the logic lives here, pinned `@v1`.
+# artifact-only GoReleaser, exact draft staging, release-ID publication, and Homebrew
+# publication. Each repo's release.yml collapses to a `uses:` + a few `with:` inputs.
 #
 # How a repo ships is decided by its in-repo .goreleaser.yaml plus these inputs:
-#   • cask (default): .goreleaser.yaml has a `homebrew_casks:` block; goreleaser
-#     publishes it. (cc-merge, reposync, cc-review, cc-orchestrate, slop-cop)
-#   • formula: set render-formula:true + formula-template/formula-name; goreleaser
-#     builds with NO homebrew block, then render-formula + publish ship the .rb.
+#   • cask (default): .goreleaser.yaml has a `homebrew_casks:` block. GoReleaser
+#     renders it under dist/homebrew; this workflow publishes it only after the exact
+#     GitHub release is public. (cc-merge, reposync, cc-review, cc-orchestrate, slop-cop)
+#   • formula: set render-formula:true + formula-template/formula-name. GoReleaser
+#     builds with NO homebrew block; this workflow renders and publishes the .rb.
 #     (ccx, synckitd)
 #   • signing: signer:quill (default, ubuntu, full-chain p12) or signer:codesign
 #     (a macOS runner; the import-developer-id action wires native codesign via a
 #     goreleaser post-hook calling {{ .Env.MACOS_CODESIGN_SCRIPT }}).
 #
 # Callers MUST use `secrets: inherit` (forwards HOMEBREW_TAP_TOKEN + the five MACOS_*).
-# Minimal callers:
-#   jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@v1, secrets: inherit } }
+# Minimal callers pin this workflow by exact commit and inherit release credentials.
 #   formula:  with: { render-formula: true, formula-template: .github/formula/x.rb.tmpl, formula-name: x }
 #   cgo cask: with: { runner: macos-latest, signer: codesign, setup-zig: "0.16.0" }
 
@@ -73,6 +72,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ${{ inputs.runner }}
@@ -88,6 +91,7 @@ jobs:
           plugin-manifest: ${{ inputs.plugin-manifest }}
 
       - name: Auto-tag (push-to-main release)
+        id: auto-tag
         if: ${{ inputs.auto-tag }}
         run: |
           set -euo pipefail
@@ -123,6 +127,23 @@ jobs:
             git push origin "$TAG"
           fi
           echo "GORELEASER_CURRENT_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the exact release tag
+        id: tag
+        env:
+          AUTO_TAG: ${{ steps.auto-tag.outputs.tag }}
+          GENERATED: ${{ inputs.auto-tag }}
+          PUSH_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$GENERATED" = true ]; then
+            tag="$AUTO_TAG"
+          else
+            tag="$PUSH_TAG"
+          fi
+          [[ "$tag" == v* ]] || { echo "::error::invalid release tag '$tag'"; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - if: ${{ inputs.setup-bun }}
         uses: oven-sh/setup-bun@v2
@@ -196,35 +217,23 @@ jobs:
           version: "~> v2"
           install-only: true
 
-      - name: Release (retry past flaky notarization)
+      - name: Build release artifacts without publishing
         run: |
           set -euo pipefail
-          # notarytool/quill is the flakiest step and runs BEFORE goreleaser publishes the GitHub
-          # release or pushes the tap, so the common transient case (a notarize blip) retries
-          # cleanly — nothing was published yet. A rarer failure mid-publish retries too; that
-          # asset re-upload is idempotent only if the repo's .goreleaser.yaml sets
-          # release.replace_existing_artifacts: true (the repo-bootstrap template does) — otherwise
-          # the retry surfaces a 422 and the release must be re-run after deleting the partial one.
-          # Retry up to 3x with backoff.
           attempt=1
           while :; do
-            if goreleaser release --clean; then
+            if goreleaser release --clean --skip=publish; then
               break
             fi
             if [ "$attempt" -ge 3 ]; then
-              echo "::error::goreleaser release failed after 3 attempts"; exit 1
+              echo "::error::goreleaser artifact build failed after 3 attempts"; exit 1
             fi
-            echo "::warning::goreleaser release failed (attempt $attempt/3); retrying in $((attempt * 60))s"
+            echo "::warning::goreleaser artifact build failed (attempt $attempt/3); retrying in $((attempt * 60))s"
             sleep "$((attempt * 60))"
             attempt=$((attempt + 1))
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          # quill path (ubuntu) reads these; the .goreleaser.yaml notarize block gates on
-          # MACOS_SIGN_P12 being non-empty. The codesign path instead reads
-          # MACOS_SIGN_IDENTITY / MACOS_NOTARY_* / MACOS_CODESIGN_SCRIPT from $GITHUB_ENV
-          # (set by the import-developer-id step above), so it ignores these.
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
           MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
@@ -232,17 +241,80 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
 
       - name: Render the formula
-        if: ${{ inputs.render-formula }}
+        if: ${{ inputs.render-formula && !contains(steps.tag.outputs.tag, '-') }}
         uses: yasyf/homebrew-tap/.github/actions/render-formula@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           template: ${{ inputs.formula-template }}
           name: ${{ inputs.formula-name }}
           output: Formula/${{ inputs.formula-name }}.rb
 
-      - name: Publish the formula to the tap
-        if: ${{ inputs.render-formula }}
+      - name: Verify Homebrew staging
+        if: ${{ !contains(steps.tag.outputs.tag, '-') }}
+        env:
+          RENDER_FORMULA: ${{ inputs.render-formula }}
+        run: |
+          set -euo pipefail
+          if [ "$RENDER_FORMULA" = true ]; then
+            dir=tap-staging
+            if find dist/homebrew -type f -name '*.rb' -print -quit 2>/dev/null | grep -q .; then
+              echo "::error::render-formula releases must not also define GoReleaser Homebrew output"
+              exit 1
+            fi
+          else
+            dir=dist/homebrew
+          fi
+          test -d "$dir" || { echo "::error::Homebrew staging directory '$dir' is missing"; exit 1; }
+          find "$dir" -type f -name '*.rb' -print -quit | grep -q . \
+            || { echo "::error::Homebrew staging directory '$dir' contains no Ruby delivery"; exit 1; }
+
+      - name: Record the exact release asset manifest
+        uses: yasyf/homebrew-tap/.github/actions/go-release-manifest@eb73d87f6b53a71f49d846ec28756ea243970d45
+        with:
+          artifacts: dist/artifacts.json
+          output: ${{ runner.temp }}/go-release-assets
+
+      - name: Verify local release checksums
+        run: |
+          set -euo pipefail
+          while IFS= read -r checksum; do
+            (
+              cd "$(dirname "$checksum")"
+              shasum -a 256 -c "$(basename "$checksum")"
+            )
+          done < <(jq -r '.[] | select(.type == "Checksum") | .path' dist/artifacts.json)
+
+      - name: Stage and verify the complete draft release
+        id: draft
+        uses: yasyf/homebrew-tap/.github/actions/stage-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5
+        with:
+          token: ${{ github.token }}
+          tag: ${{ steps.tag.outputs.tag }}
+          manifest: ${{ runner.temp }}/go-release-assets
+          title: ${{ steps.tag.outputs.tag }}
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+
+      - name: Publish the verified release
+        uses: yasyf/homebrew-tap/.github/actions/publish-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5
+        with:
+          token: ${{ github.token }}
+          release-id: ${{ steps.draft.outputs['release-id'] }}
+          tag: ${{ steps.tag.outputs.tag }}
+          manifest: ${{ runner.temp }}/go-release-assets
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+          make-latest: ${{ !contains(steps.tag.outputs.tag, '-') }}
+
+      - name: Publish the generated Homebrew delivery
+        if: ${{ !inputs.render-formula && !contains(steps.tag.outputs.tag, '-') }}
+        uses: yasyf/homebrew-tap/.github/actions/publish@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          dir: dist/homebrew
+          message: "${{ github.event.repository.name }} ${{ steps.tag.outputs.tag }}"
+
+      - name: Publish the rendered formula to the tap
+        if: ${{ inputs.render-formula && !contains(steps.tag.outputs.tag, '-') }}
         uses: yasyf/homebrew-tap/.github/actions/publish@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           dir: tap-staging
-          message: "${{ inputs.formula-name }} ${{ github.ref_name }}"
+          message: "${{ inputs.formula-name }} ${{ steps.tag.outputs.tag }}"
