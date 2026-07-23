@@ -204,7 +204,7 @@ jobs:
 
       - name: Publish the formula to the tap
         if: ${{ inputs.render-formula }}
-        uses: yasyf/homebrew-tap/.github/actions/publish@v1
+        uses: yasyf/homebrew-tap/.github/actions/publish@v2
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           dir: tap-staging
