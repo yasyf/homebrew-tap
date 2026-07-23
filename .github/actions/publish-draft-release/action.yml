@@ -18,6 +18,10 @@ inputs:
     description: Whether the release is a prerelease
     required: false
     default: "false"
+  make-latest:
+    description: Whether a stable release becomes the latest release
+    required: false
+    default: "false"
 
 outputs:
   url:
@@ -35,4 +39,5 @@ runs:
         RELEASE_TAG: ${{ inputs.tag }}
         ASSET_MANIFEST: ${{ inputs.manifest }}
         RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+        RELEASE_MAKE_LATEST: ${{ inputs.make-latest }}
       run: bash "$GITHUB_ACTION_PATH/publish.sh"

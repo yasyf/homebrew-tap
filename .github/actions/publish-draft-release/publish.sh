@@ -29,6 +29,12 @@ case "${RELEASE_PRERELEASE:-}" in
   true|false) ;;
   *) fail "prerelease must be true or false" ;;
 esac
+case "${RELEASE_MAKE_LATEST:-}" in
+  true|false) ;;
+  *) fail "make-latest must be true or false" ;;
+esac
+[ "$RELEASE_PRERELEASE" != true ] || [ "$RELEASE_MAKE_LATEST" != true ] \
+  || fail "a prerelease cannot be the latest stable release"
 
 assets=()
 expected="$RUNNER_TEMP/publish-expected-assets"
@@ -73,8 +79,10 @@ done
 if [ "$(jq -r .draft "$state")" = true ]; then
   assert_unique_release true
   payload="$RUNNER_TEMP/publish-release.json"
-  jq -n --argjson prerelease "$RELEASE_PRERELEASE" \
-    '{draft: false, prerelease: $prerelease}' > "$payload"
+  jq -n \
+    --argjson prerelease "$RELEASE_PRERELEASE" \
+    --arg make_latest "$RELEASE_MAKE_LATEST" \
+    '{draft: false, prerelease: $prerelease, make_latest: $make_latest}' > "$payload"
   published="$RUNNER_TEMP/published-release.json"
   gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
     --input "$payload" > "$published"

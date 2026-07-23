@@ -84,6 +84,8 @@ assert_unique_release "$release_id" "$draft"
 
 if [ "$draft" = true ]; then
   assert_unique_release "$release_id" true
+  upload_url="$(jq -r '.upload_url | sub("\\{.*$"; "")' "$state")"
+  [[ "$upload_url" == https://uploads.github.com/* ]] || fail "release upload URL is invalid"
   asset_ids="$RUNNER_TEMP/release-asset-ids"
   gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
     | jq -r '.[].id' > "$asset_ids"
@@ -100,7 +102,7 @@ if [ "$draft" = true ]; then
     gh api --method POST \
       -H 'Content-Type: application/octet-stream' \
       --input "$asset" \
-      "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded}" \
+      "${upload_url}?name=${encoded}" \
       > /dev/null
   done
 fi
