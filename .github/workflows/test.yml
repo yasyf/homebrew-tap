@@ -218,15 +218,24 @@ jobs:
       - name: Create representative GoReleaser artifacts
         run: |
           set -euo pipefail
-          mkdir -p dist/bin dist/homebrew/Casks
+          mkdir -p dist/bin dist/nested dist/homebrew/Casks
           printf 'archive\n' > dist/tool_darwin_arm64.tar.gz
+          printf 'nested archive\n' > dist/nested/tool_nested
           printf 'binary\n' > dist/bin/tool
           printf 'raw binary\n' > dist/tool_raw
           printf 'cask\n' > dist/homebrew/Casks/tool.rb
-          sha256sum dist/tool_darwin_arm64.tar.gz dist/tool_raw > dist/checksums.txt
+          for path in \
+            dist/tool_darwin_arm64.tar.gz \
+            dist/nested/tool_nested \
+            dist/tool_raw; do
+            printf '%s  %s\n' \
+              "$(shasum -a 256 "$path" | awk '{print $1}')" \
+              "$(basename "$path")"
+          done > dist/checksums.txt
           printf '{}\n' > dist/metadata.json
           jq -n '[
             {type:"Archive", name:"tool_darwin_arm64.tar.gz", path:"dist/tool_darwin_arm64.tar.gz"},
+            {type:"Archive", name:"tool_nested", path:"dist/nested/tool_nested"},
             {type:"Checksum", name:"checksums.txt", path:"dist/checksums.txt"},
             {type:"Binary", name:"tool_raw", path:"dist/tool_raw"},
             {type:"Binary", name:"tool", path:"dist/bin/tool"},
@@ -240,13 +249,26 @@ jobs:
       - name: Verify release and local artifact classes remain separate
         run: |
           set -euo pipefail
-          printf '%s\n' dist/checksums.txt dist/tool_darwin_arm64.tar.gz dist/tool_raw \
+          printf '%s\n' \
+            dist/checksums.txt \
+            dist/nested/tool_nested \
+            dist/tool_darwin_arm64.tar.gz \
+            dist/tool_raw \
             > "$RUNNER_TEMP/expected-assets"
           diff -u "$RUNNER_TEMP/expected-assets" "$RUNNER_TEMP/release-assets"
           jq '.[0].type = "Docker Image"' dist/artifacts.json > "$RUNNER_TEMP/unsupported.json"
           if bash .github/actions/go-release-manifest/manifest.sh \
             "$RUNNER_TEMP/unsupported.json" "$RUNNER_TEMP/unsupported-assets"; then
             echo "::error::unsupported artifact class was accepted"
+            exit 1
+          fi
+          mkdir -p dist/collision
+          cp dist/tool_raw dist/collision/tool_raw
+          jq '. + [{type:"File", name:"tool_raw", path:"dist/collision/tool_raw"}]' \
+            dist/artifacts.json > "$RUNNER_TEMP/collision.json"
+          if bash .github/actions/go-release-manifest/manifest.sh \
+            "$RUNNER_TEMP/collision.json" "$RUNNER_TEMP/collision-assets"; then
+            echo "::error::duplicate release artifact basename was accepted"
             exit 1
           fi
       - name: Prove build-only GoReleaser still renders Homebrew

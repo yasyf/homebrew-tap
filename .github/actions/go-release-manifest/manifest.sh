@@ -15,7 +15,8 @@ jq -e 'type == "array"' "$artifacts" >/dev/null || fail "artifacts JSON is not a
 rows="${output}.rows.$$"
 manifest="${output}.tmp.$$"
 names="${output}.names.$$"
-trap 'rm -f -- "$rows" "$manifest" "$names"' EXIT
+verify="${output}.verify.$$"
+trap 'rm -f -- "$rows" "$manifest" "$names"; rm -rf -- "$verify"' EXIT
 mkdir -p "$(dirname "$output")"
 : > "$manifest"
 : > "$names"
@@ -84,4 +85,22 @@ done < "$rows"
   || fail "release artifact basenames are not unique"
 
 sort -o "$manifest" "$manifest"
+mkdir "$verify"
+workspace="$(pwd -P)"
+while IFS= read -r path || [ -n "$path" ]; do
+  name="$(basename "$path")"
+  target="$verify/$name"
+  [ ! -e "$target" ] && [ ! -L "$target" ] \
+    || fail "release artifact basename collision for '$name'"
+  ln -s "$workspace/$path" "$target"
+done < "$manifest"
+
+while IFS=$'\t' read -r class type name path || [ -n "${class:-}" ]; do
+  [ "$class" = release ] && [ "$type" = Checksum ] || continue
+  (
+    cd "$verify"
+    shasum -a 256 -c "$name"
+  ) || fail "checksum artifact '$path' does not verify the exact release manifest"
+done < "$rows"
+
 mv "$manifest" "$output"

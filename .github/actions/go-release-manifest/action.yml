@@ -1,5 +1,5 @@
-name: Classify GoReleaser release assets
-description: Build an exact manifest from supported GoReleaser artifact classes without publishing.
+name: Classify and verify GoReleaser release assets
+description: Build an exact manifest and verify its checksum artifacts without publishing.
 
 inputs:
   artifacts:
