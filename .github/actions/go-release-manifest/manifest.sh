@@ -54,8 +54,9 @@ manifest="${output}.tmp.$$"
 materialized="${output}.files"
 trap 'rm -f -- "$rows" "$candidates" "$checksums" "$sidecars" "$references" "$primary_names" "$release_rows" "$manifest"' EXIT
 mkdir -p "$(dirname "$output")"
-[ ! -e "$materialized" ] && [ ! -L "$materialized" ] \
-  || fail "materialized asset directory '$materialized' already exists"
+if [ -e "$materialized" ] || [ -L "$materialized" ]; then
+  fail "materialized asset directory '$materialized' already exists"
+fi
 mkdir "$materialized"
 : > "$candidates"
 : > "$checksums"
