@@ -58,6 +58,7 @@ jobs:
             .github/actions/prepare-app-build/prepare.sh
             .github/actions/publish/delete-exact-file.sh
             .github/actions/publish/reject-retired-surfaces.sh
+            .github/actions/sign-notarize-app/write-sha256-sidecar.sh
             .github/test-fixtures/prebuild-hook.sh
           )
           shellcheck "${checked[@]}"
@@ -176,6 +177,25 @@ jobs:
         with:
           go-version: stable
           cache: false
+
+      - name: Verify release-app checksum sidecars after download
+        run: |
+          set -euo pipefail
+          source="$RUNNER_TEMP/release-app-sidecar-source"
+          download="$RUNNER_TEMP/arbitrary/download/directory"
+          mkdir -p "$source" "$download"
+          asset="$source/example-v1.2.3-darwin.zip"
+          printf 'portable release artifact\n' > "$asset"
+
+          sha="$("$GITHUB_WORKSPACE/.github/actions/sign-notarize-app/write-sha256-sidecar.sh" "$asset")"
+          [ "$(cat "$asset.sha256")" = "$sha  ${asset##*/}" ] \
+            || { echo "::error::release-app sidecar does not name the asset by basename"; exit 1; }
+
+          cp "$asset" "$asset.sha256" "$download/"
+          (
+            cd "$download"
+            shasum -a 256 -c "${asset##*/}.sha256"
+          )
 
       - name: prepare-app-build validates without mutating either runner
         uses: ./.github/actions/prepare-app-build

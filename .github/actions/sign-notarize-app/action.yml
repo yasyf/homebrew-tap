@@ -134,9 +134,7 @@ runs:
         mkdir -p dist
         zip="dist/${NAME}-${RELEASE_TAG}-darwin.zip"
         ditto -c -k --keepParent "$APP" "$zip"
-        sha="$(shasum -a 256 "$zip" | awk '{print $1}')"
-        # Basename manifest so `shasum -c` works beside the downloaded asset.
-        (cd dist && shasum -a 256 "${zip##*/}" > "${zip##*/}.sha256")
+        sha="$("$GITHUB_ACTION_PATH/write-sha256-sidecar.sh" "$zip")"
         echo "sha256=$sha" >> "$GITHUB_OUTPUT"
         echo "zip=$zip" >> "$GITHUB_OUTPUT"
         echo "sign-notarize-app: $zip ($sha)"
