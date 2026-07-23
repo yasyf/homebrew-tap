@@ -58,7 +58,7 @@ jobs:
           grep -Fq 'contents: read' "$workflow"
           grep -Fq 'uses: actions/upload-artifact@v7' "$workflow"
           grep -Fq "artifact_name=release-app-\${ASSET_NAME}" "$workflow"
-          grep -Fq 'uses: yasyf/homebrew-tap/.github/actions/sign-notarize-app@1666a5363ad6f2ed7ac0be901702e523cc1fba66' "$workflow"
+          grep -Fq 'uses: yasyf/homebrew-tap/.github/actions/sign-notarize-app@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9' "$workflow"
           if grep -Eq 'softprops/action-gh-release|gh release|contents: write' "$workflow"; then
             echo "::error::release-app must stage an Actions artifact without mutating a GitHub Release"
             exit 1
