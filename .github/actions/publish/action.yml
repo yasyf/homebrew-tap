@@ -41,18 +41,20 @@ runs:
         [ -d "$PUBLISH_DIR" ] || { echo "::error::publish dir '$PUBLISH_DIR' does not exist"; exit 1; }
         if [ -e "$PUBLISH_DIR/Casks/fusekit-holder.rb" ] || \
            [ -e "$PUBLISH_DIR/Casks/cc-notes-holder.rb" ] || \
-           grep -RIlE 'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app' \
+           [ -e "$PUBLISH_DIR/Casks/cc-notes-helper.rb" ] || \
+           grep -RIlE 'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app|cc-notes-helper|com\.yasyf\.cc-notes\.helper|CCNotesHelper\.app' \
              "$PUBLISH_DIR/Casks" "$PUBLISH_DIR/Formula" 2>/dev/null | grep -q .; then
-          echo "::error::refusing to republish a retired standalone FuseKit holder"
+          echo "::error::refusing to publish a standalone FuseKit runtime app"
           exit 1
         fi
         # Merge the staged Formula//Casks/ files into the tap working tree.
         cp -R "$PUBLISH_DIR"/. .tap-publish/
         if [ -e .tap-publish/Casks/fusekit-holder.rb ] || \
            [ -e .tap-publish/Casks/cc-notes-holder.rb ] || \
-           grep -RIlE 'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app' \
+           [ -e .tap-publish/Casks/cc-notes-helper.rb ] || \
+           grep -RIlE 'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app|cc-notes-helper|com\.yasyf\.cc-notes\.helper|CCNotesHelper\.app' \
              .tap-publish/Casks .tap-publish/Formula 2>/dev/null | grep -q .; then
-          echo "::error::a retired standalone FuseKit holder exists in the merged tap"
+          echo "::error::a standalone FuseKit runtime app exists in the merged tap"
           exit 1
         fi
         cd .tap-publish

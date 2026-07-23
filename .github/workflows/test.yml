@@ -20,13 +20,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Reject retired standalone FuseKit holders
+      - name: Reject standalone FuseKit runtime apps
         run: |
           set -euo pipefail
           test ! -e Casks/fusekit-holder.rb
           test ! -e Casks/cc-notes-holder.rb
-          if grep -RInE 'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app' Casks Formula; then
-            echo "::error::a retired standalone FuseKit holder returned to the tap"
+          test ! -e Casks/cc-notes-helper.rb
+          if grep -RInE 'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app|cc-notes-helper|com\.yasyf\.cc-notes\.helper|CCNotesHelper\.app' Casks Formula; then
+            echo "::error::a standalone FuseKit runtime app returned to the tap"
             exit 1
           fi
 
