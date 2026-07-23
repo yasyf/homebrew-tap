@@ -59,7 +59,7 @@ on: { push: { tags: ["v*"] } }
 permissions: { contents: write }
 jobs:
   release:
-    uses: yasyf/homebrew-tap/.github/workflows/release-bun.yml@38d02337869373c871b78113f7ddd4f7d62c2380
+    uses: yasyf/homebrew-tap/.github/workflows/release-bun.yml@a9ecff42ac7721452905327071316bca2b49bb68
     secrets: inherit
 ```
 
@@ -82,7 +82,7 @@ Xcode `.app`) and compose their own workflow:
 | `actions/publish@v1` | merge a staging dir's `Formula/`/`Casks/` into this tap and push (idempotent) |
 | `actions/build-swift-universal@swift-v1` | build an SPM executable as a universal (arm64 + x86_64) release binary and assert both slices |
 | `actions/sign-notarize-binary@swift-v1` | codesign + notarize a bare Mach-O CLI via `$MACOS_CODESIGN_SCRIPT`, zip + checksum it, attach to the release (the `.app`-less sibling of `sign-notarize-app`); an optional `platform` input names a per-arch zip (how `@bun-v1` uses it), defaulting to the swift `darwin-universal` |
-| `actions/build-bun-binary@bun-v1` | compile a bun project into a single-file executable for one explicit `bun-<platform>` target (frozen install with retries, `file`-based Mach-O/ELF format assert) |
+| `actions/build-bun-binary@a9ecff42ac7721452905327071316bca2b49bb68` | compile a bun project into a single-file executable for one explicit `bun-<platform>` target (frozen install with retries, `file`-based Mach-O/ELF format assert) |
 
 Distribution choice: a pure-binary Go CLI ships as a **cask** (GoReleaser
 `homebrew_casks:` metadata is rendered and verified before exact-ID publication); a Swift CLI ships as a

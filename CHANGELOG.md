@@ -1,9 +1,9 @@
 # Changelog
 
 Four independent tag families version the shared release infrastructure in
-`.github/`. Consumers pin a floating major (`@v1`, `@pypi-v1`, `@swift-v1`, or
-`@bun-v1`); each move of a floating major is anchored by an immutable point tag
-(`v1.0.0`, `pypi-v1.0.0`, `swift-v1.0.0`, `bun-v1.0.0`, …).
+`.github/`. Consumers pin immutable 40-character commit SHAs. Point tags
+(`v1.0.0`, `pypi-v1.0.0`, `swift-v1.0.0`, `bun-v1.0.0`, …) record release
+provenance; floating family tags are never runtime dependencies.
 
 - **`v1` family** — Go: the composite actions (`verify-tag-on-main`,
   `import-developer-id` + `macos-codesign.sh`, `render-formula`,
@@ -29,10 +29,21 @@ Four independent tag families version the shared release infrastructure in
   the profile's `Entitlements` authorize `com.apple.security.application-groups`,
   so an app-group service can't ship a bundle that silently re-prompts. Reads
   `MACOS_SIGN_IDENTITY` / `MACOS_NOTARY_*` from the env like `sign-notarize-app`
-  (run `import-developer-id` first). Consumers pin `@v1` after the floating major
-  is force-moved onto the point tag that ships this.
+  (run `import-developer-id` first). Consumers pin the green immutable owner
+  commit that ships this.
 
-## bun-v1.0.1 — 2026-07-18 (`40fba45`; `bun-v1` points here)
+## bun-v1.0.2 — 2026-07-23 (`a9ecff4`)
+
+- Bun releases stage an exact numeric-ID draft with the complete four-platform
+  asset manifest and verify every downloaded byte before publication.
+- Darwin artifacts fail closed unless signing and notarization complete, while
+  packaged binaries retain quarantine so Gatekeeper evaluates the notarization.
+- Final cask staging must contain exactly one syntactically valid expected file.
+  The exact GitHub release becomes public before the tap advances, so a failed
+  release transition can never expose a cask whose assets are still private.
+- Internal release actions and consumer examples use immutable commit SHAs.
+
+## bun-v1.0.1 — 2026-07-18 (`40fba45`)
 
 Both found by cc-pane's `v0.1.0-rc.1` prerelease dry-run:
 
@@ -54,7 +65,7 @@ Both found by cc-pane's `v0.1.0-rc.1` prerelease dry-run:
   post-sign smoke proves the artifact that ships (codesigning a bun binary
   wrongly can break it outright — a bad local re-sign SIGTRAPs at launch).
 
-## bun-v1.0.0 — 2026-07-18 (`1db2d14`; `bun-v1` points here)
+## bun-v1.0.0 — 2026-07-18 (`1db2d14`)
 
 First pinned point release of the Bun family:
 
