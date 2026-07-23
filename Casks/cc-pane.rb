@@ -1,25 +1,25 @@
 # Rendered by release-bun.yml from .github/formula/cc-pane.rb.tmpl — edit the template, not the tap copy.
 cask "cc-pane" do
-  version "0.1.0"
+  version "0.1.1"
 
   on_macos do
     on_arm do
-      sha256 "6802998a425fe5dc2bcdd5106dc0375cf8fb330bbe9194589ae8854e39d059b9"
+      sha256 "50d21195c50584c8ad9c3e53c1dca4d183cf2072a880f1724389d8f93ad0fb81"
       url "https://github.com/yasyf/cc-pane/releases/download/v#{version}/cc-pane-v#{version}-darwin-arm64.zip"
     end
     on_intel do
-      sha256 "60bd73a89a78ee57848768958e489cf2715f543a0f779c41e75511db2b4875c7"
+      sha256 "abf097bbaafe335737e196ebd42e373bd7e31b72d3e6723da5a088fc245c0afc"
       url "https://github.com/yasyf/cc-pane/releases/download/v#{version}/cc-pane-v#{version}-darwin-x64.zip"
     end
   end
 
   on_linux do
     on_arm do
-      sha256 "0028874a1923e1a755e9acef51122f2edddbacbd5c53252cedaef6745d37d46d"
+      sha256 "fac9b50e392bd760aa0df31f673ee2da01e89d2cad86440af539abe88856c815"
       url "https://github.com/yasyf/cc-pane/releases/download/v#{version}/cc-pane-v#{version}-linux-arm64.zip"
     end
     on_intel do
-      sha256 "21894e24592469035b7591a7d79c1623ac02b821d9ee9744659808f831e46267"
+      sha256 "69b3de9fae35105b2f315f1b7b8ada4bf9ca84fcd0e5d6e272775bc98f4c6354"
       url "https://github.com/yasyf/cc-pane/releases/download/v#{version}/cc-pane-v#{version}-linux-x64.zip"
     end
   end
@@ -32,13 +32,6 @@ cask "cc-pane" do
   depends_on formula: "cc-notes"
 
   binary "cc-pane"
-
-  postflight do
-    if OS.mac?
-      system_command "/usr/bin/xattr",
-                     args: ["-dr", "com.apple.quarantine", "#{staged_path}/cc-pane"]
-    end
-  end
 
   livecheck do
     skip "Auto-generated on release."
