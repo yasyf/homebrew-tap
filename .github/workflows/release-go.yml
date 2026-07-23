@@ -226,8 +226,6 @@ jobs:
             *) echo "::error::Developer ID identity '$IDENTITY' does not match Team ID '$TEAM_ID'"; exit 1 ;;
           esac
 
-      # install-only puts the goreleaser binary on PATH so the next step can wrap
-      # `release` in a retry loop — a marketplace action step can't be retried in bash.
       - name: Install goreleaser
         uses: goreleaser/goreleaser-action@v7
         with:
@@ -235,20 +233,7 @@ jobs:
           install-only: true
 
       - name: Build release artifacts without publishing
-        run: |
-          set -euo pipefail
-          attempt=1
-          while :; do
-            if goreleaser release --clean --skip=publish; then
-              break
-            fi
-            if [ "$attempt" -ge 3 ]; then
-              echo "::error::goreleaser artifact build failed after 3 attempts"; exit 1
-            fi
-            echo "::warning::goreleaser artifact build failed (attempt $attempt/3); retrying in $((attempt * 60))s"
-            sleep "$((attempt * 60))"
-            attempt=$((attempt + 1))
-          done
+        run: goreleaser release --clean --skip=publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
@@ -269,21 +254,34 @@ jobs:
       - name: Verify Homebrew staging
         if: ${{ steps.tag.outputs.prerelease == 'false' }}
         env:
+          FORMULA_NAME: ${{ inputs.formula-name }}
           RENDER_FORMULA: ${{ inputs.render-formula }}
         run: |
           set -euo pipefail
+          expected="$RUNNER_TEMP/expected-homebrew-files"
+          actual="$RUNNER_TEMP/actual-homebrew-files"
           if [ "$RENDER_FORMULA" = true ]; then
+            test -n "$FORMULA_NAME" || { echo "::error::formula-name is required"; exit 1; }
             dir=tap-staging
-            if find dist/homebrew -type f -name '*.rb' -print -quit 2>/dev/null | grep -q .; then
+            jq -r '.[] | select(.type == "Homebrew Cask" or .type == "Homebrew Formula") | .path' \
+              dist/artifacts.json | sort > "$expected"
+            if [ -s "$expected" ]; then
               echo "::error::render-formula releases must not also define GoReleaser Homebrew output"
               exit 1
             fi
+            printf '%s\n' "tap-staging/Formula/${FORMULA_NAME}.rb" > "$expected"
           else
             dir=dist/homebrew
+            jq -r '.[] | select(.type == "Homebrew Cask" or .type == "Homebrew Formula") | .path' \
+              dist/artifacts.json | sort > "$expected"
           fi
           test -d "$dir" || { echo "::error::Homebrew staging directory '$dir' is missing"; exit 1; }
-          find "$dir" -type f -name '*.rb' -print -quit | grep -q . \
-            || { echo "::error::Homebrew staging directory '$dir' contains no Ruby delivery"; exit 1; }
+          test -s "$expected" || { echo "::error::Homebrew artifact set is empty"; exit 1; }
+          find "$dir" -type f | sort > "$actual"
+          diff -u "$expected" "$actual" || {
+            echo "::error::Homebrew staging contains unclassified or missing files"
+            exit 1
+          }
 
       - name: Record the exact release asset manifest
         uses: yasyf/homebrew-tap/.github/actions/go-release-manifest@eb73d87f6b53a71f49d846ec28756ea243970d45
@@ -323,7 +321,7 @@ jobs:
 
       - name: Publish the generated Homebrew delivery
         if: ${{ !inputs.render-formula && steps.tag.outputs.prerelease == 'false' }}
-        uses: yasyf/homebrew-tap/.github/actions/publish@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
+        uses: yasyf/homebrew-tap/.github/actions/publish@9ca67392d45d66b6ae01e262383c8f3138d56f5e
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           dir: dist/homebrew
@@ -331,7 +329,7 @@ jobs:
 
       - name: Publish the rendered formula to the tap
         if: ${{ inputs.render-formula && steps.tag.outputs.prerelease == 'false' }}
-        uses: yasyf/homebrew-tap/.github/actions/publish@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
+        uses: yasyf/homebrew-tap/.github/actions/publish@9ca67392d45d66b6ae01e262383c8f3138d56f5e
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           dir: tap-staging

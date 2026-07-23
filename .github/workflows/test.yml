@@ -107,9 +107,11 @@ jobs:
           go=.github/workflows/release-go.yml
           manifest_pin=eb73d87f6b53a71f49d846ec28756ea243970d45
           draft_pin=54e3e194bda69896894a82c17fcdb2822beefab5
+          publish_pin=9ca67392d45d66b6ae01e262383c8f3138d56f5e
           test "$(grep -Ec "actions/go-release-manifest@${manifest_pin}$" "$go")" = 1
           test "$(grep -Ec "actions/stage-draft-release@${draft_pin}$" "$go")" = 1
           test "$(grep -Ec "actions/publish-draft-release@${draft_pin}$" "$go")" = 1
+          test "$(grep -Ec "actions/publish@${publish_pin}$" "$go")" = 2
           grep -Fq 'goreleaser release --clean --skip=publish' "$go"
           grep -Fq "auto-tag release commit \$SHA is not an ancestor of \$DEFAULT_BRANCH" "$go"
           version_ref="version: \$"
@@ -292,6 +294,10 @@ jobs:
           git tag v1.2.3
           goreleaser release --clean --skip=publish
           test -f dist/homebrew/Casks/fixture.rb
+          jq -r '.[] | select(.type == "Homebrew Cask" or .type == "Homebrew Formula") | .path' \
+            dist/artifacts.json | sort > "$RUNNER_TEMP/expected-real-homebrew"
+          find dist/homebrew -type f | sort > "$RUNNER_TEMP/actual-real-homebrew"
+          diff -u "$RUNNER_TEMP/expected-real-homebrew" "$RUNNER_TEMP/actual-real-homebrew"
           bash "$GITHUB_WORKSPACE/.github/actions/go-release-manifest/manifest.sh" \
             dist/artifacts.json "$RUNNER_TEMP/real-release-assets"
           test "$(wc -l < "$RUNNER_TEMP/real-release-assets" | tr -d ' ')" = 2
