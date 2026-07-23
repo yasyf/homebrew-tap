@@ -4,8 +4,7 @@
 # build matrix producing single-file binaries, Developer ID codesign + notarytool on
 # the darwin legs, one GitHub release, and a rendered binary cask pushed to this tap.
 # Each repo's release.yml collapses to a `uses:` line; the logic lives here, pinned
-# `@bun-v1` (release-bun.yml does not exist at `v1` — bun callers must pin the bun
-# family).
+# to the exact immutable workflow owner commit.
 #
 # Zero-config contract: every input defaults. The bun entry point is src/index.ts, the
 # binary / cask are named after the repo, and a `.bun-version` file MUST pin the bun
@@ -14,7 +13,7 @@
 #
 # Callers MUST use `secrets: inherit` (forwards HOMEBREW_TAP_TOKEN + the five MACOS_*).
 # Minimal caller:
-#   jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-bun.yml@bun-v1, secrets: inherit } }
+#   jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-bun.yml@a9ecff42ac7721452905327071316bca2b49bb68, secrets: inherit } }
 #
 # Why a 4-leg native-runner matrix (no cross-compile): bun refuses to extract
 # platform-mismatched optional deps, and `bun build --compile --target=…` inlines

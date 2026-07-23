@@ -576,7 +576,8 @@ jobs:
       # formula-collision guard, 4-leg artifact aggregation, single-release creation,
       # cask publish) can't run here — they need a real tag + release. They're exercised
       # only by consumer releases — validate with an rc tag on the first consumer before
-      # repointing bun-v1. build-bun-binary and the sign-notarize `platform` input DO run
+      # repinning callers to an immutable workflow owner. build-bun-binary and the
+      # sign-notarize `platform` input DO run
       # here, on both runner OSes.
       - uses: oven-sh/setup-bun@v2
 

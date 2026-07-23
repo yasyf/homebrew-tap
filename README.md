@@ -81,7 +81,7 @@ Xcode `.app`) and compose their own workflow:
 | `actions/wrap-daemon-bundle@v1` | wrap a bare Mach-O daemon in a minimal signed + notarized + stapled `.app` (with an embedded provisioning profile) so its TCC grant is keyed by `CFBundleIdentifier` and survives `brew upgrade` instead of re-prompting every release |
 | `actions/publish@v1` | merge a staging dir's `Formula/`/`Casks/` into this tap and push (idempotent) |
 | `actions/build-swift-universal@swift-v1` | build an SPM executable as a universal (arm64 + x86_64) release binary and assert both slices |
-| `actions/sign-notarize-binary@swift-v1` | codesign + notarize a bare Mach-O CLI via `$MACOS_CODESIGN_SCRIPT`, zip + checksum it, attach to the release (the `.app`-less sibling of `sign-notarize-app`); an optional `platform` input names a per-arch zip (how `@bun-v1` uses it), defaulting to the swift `darwin-universal` |
+| `actions/sign-notarize-binary@swift-v1` | codesign + notarize a bare Mach-O CLI via `$MACOS_CODESIGN_SCRIPT`, zip + checksum it, attach to the release (the `.app`-less sibling of `sign-notarize-app`); an optional `platform` input names a per-arch zip (how `release-bun.yml` uses it), defaulting to the swift `darwin-universal` |
 | `actions/build-bun-binary@a9ecff42ac7721452905327071316bca2b49bb68` | compile a bun project into a single-file executable for one explicit `bun-<platform>` target (frozen install with retries, `file`-based Mach-O/ELF format assert) |
 
 Distribution choice: a pure-binary Go CLI ships as a **cask** (GoReleaser
@@ -110,9 +110,9 @@ Four independent tag families version the shared infrastructure:
 - **`swift-v1`** — Swift: `release-swift.yml` + the `build-swift-universal` and
   `sign-notarize-binary` actions (none of which exist at `v1` — Swift callers,
   and every `uses:` inside `release-swift.yml` itself, pin `@swift-v1`).
-- **`bun-v1`** — Bun: `release-bun.yml` + the `build-bun-binary` action (neither
-  exists at `v1` — bun callers, and every `uses:` inside `release-bun.yml`
-  itself, pin `@bun-v1`).
+- **`bun-v1`** — Bun provenance label for `release-bun.yml` and the
+  `build-bun-binary` action; callers and every internal `uses:` pin immutable
+  40-character owner commits.
 
 Consumers pin immutable 40-character commit SHAs. The tag families remain useful release
 labels, but they are never runtime dependencies and are never force-moved to update callers.
