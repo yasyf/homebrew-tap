@@ -13,8 +13,9 @@ logic lives in one place instead of being copy-pasted across repos.
 
 ## Shared release infrastructure (`.github/`)
 
-**Reusable workflows** — the common pure-Go path (one ubuntu runner; goreleaser builds,
-quill-signs, and publishes a cask or formula natively):
+**Reusable workflows** — the common pure-Go path (one ubuntu runner; GoReleaser builds
+and signs without publishing, then exact-ID draft actions publish verified assets before
+the generated cask or formula):
 
 ```yaml
 # a repo's entire .github/workflows/release.yml:
@@ -23,7 +24,7 @@ on: { push: { tags: ["v*"] } }
 permissions: { contents: write }
 jobs:
   release:
-    uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@v1
+    uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@3bfe1af3bdc10ec783e79050e7c647152a537801
     secrets: inherit
     with: { setup-bun: true }   # optional, for a go:embed prebuild hook
 ```
@@ -40,7 +41,7 @@ on: { push: { tags: ["v*"] } }
 permissions: { contents: write }
 jobs:
   release:
-    uses: yasyf/homebrew-tap/.github/workflows/release-swift.yml@swift-v1
+    uses: yasyf/homebrew-tap/.github/workflows/release-swift.yml@83ee384b1d4fe25a8e4aa7258bb76d55e1593735
     secrets: inherit
 ```
 
@@ -58,7 +59,7 @@ on: { push: { tags: ["v*"] } }
 permissions: { contents: write }
 jobs:
   release:
-    uses: yasyf/homebrew-tap/.github/workflows/release-bun.yml@bun-v1
+    uses: yasyf/homebrew-tap/.github/workflows/release-bun.yml@38d02337869373c871b78113f7ddd4f7d62c2380
     secrets: inherit
 ```
 
@@ -83,8 +84,8 @@ Xcode `.app`) and compose their own workflow:
 | `actions/sign-notarize-binary@swift-v1` | codesign + notarize a bare Mach-O CLI via `$MACOS_CODESIGN_SCRIPT`, zip + checksum it, attach to the release (the `.app`-less sibling of `sign-notarize-app`); an optional `platform` input names a per-arch zip (how `@bun-v1` uses it), defaulting to the swift `darwin-universal` |
 | `actions/build-bun-binary@bun-v1` | compile a bun project into a single-file executable for one explicit `bun-<platform>` target (frozen install with retries, `file`-based Mach-O/ELF format assert) |
 
-Distribution choice: a pure-binary Go CLI ships as a **cask** (goreleaser
-`homebrew_casks:`, published natively — no render/publish step); a Swift CLI ships as a
+Distribution choice: a pure-binary Go CLI ships as a **cask** (GoReleaser
+`homebrew_casks:` metadata is rendered and verified before exact-ID publication); a Swift CLI ships as a
 **cask** too (one universal zip, rendered + published by `release-swift.yml`); so does a
 bun TUI/CLI (four per-platform zips, rendered + published by `release-bun.yml`). A tool
 that needs `brew services` or runtime `depends_on` ships as a **formula** (goreleaser
@@ -113,9 +114,7 @@ Four independent tag families version the shared infrastructure:
   exists at `v1` — bun callers, and every `uses:` inside `release-bun.yml`
   itself, pin `@bun-v1`).
 
-Consumers pin the floating major (`@v1` / `@pypi-v1` / `@swift-v1` / `@bun-v1`) and
-pick up fixes when it moves. Each move is anchored by an immutable point tag (`v1.0.0`,
-`pypi-v1.0.0`, `swift-v1.0.0`, `bun-v1.0.0`, …), protected by a repository ruleset. To ship a
-change: land it on `main` with CI green, cut the next point tag, then force-move the
-floating major onto it (`git tag -f v1 vX.Y.Z && git push -f origin v1`). History
-lives in [CHANGELOG.md](CHANGELOG.md).
+Consumers pin immutable 40-character commit SHAs. The tag families remain useful release
+labels, but they are never runtime dependencies and are never force-moved to update callers.
+To ship a change: land it on `main`, wait for CI to pass, then repin each consumer to that
+green commit. History lives in [CHANGELOG.md](CHANGELOG.md).
