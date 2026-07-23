@@ -36,13 +36,6 @@ cask "cc-orchestrate" do
 
   binary "cc-orchestrate"
 
-  postflight do
-    if OS.mac?
-      system_command "/usr/bin/xattr",
-                     args: ["-dr", "com.apple.quarantine", "#{staged_path}/cc-orchestrate"]
-    end
-  end
-
   # No zap stanza required
 
 end
