@@ -1,0 +1,60 @@
+name: Verify public Go release and render tap delivery
+description: >-
+  Verify one exact immutable public release and render its Homebrew delivery
+  from downloaded public bytes plus a source contract fetched at the tagged SHA.
+
+inputs:
+  source-repository:
+    description: Exact public yasyf source repository (owner/name)
+    required: true
+  release-id:
+    description: Exact numeric GitHub release ID
+    required: true
+  tag:
+    description: Exact stable SemVer release tag
+    required: true
+  tagged-source-sha:
+    description: Exact commit SHA reached by recursively peeling the tag
+    required: true
+  delivery-mode:
+    description: formula-template or goreleaser-cask
+    required: true
+  source-path:
+    description: Formula template or GoReleaser config path at the tagged SHA
+    required: true
+  delivery-name:
+    description: Validated Homebrew delivery name
+    required: true
+  asset-sha256:
+    description: JSON object mapping the exact public release asset set to SHA-256 values
+    required: true
+  template-asset-tokens:
+    description: Formula-only JSON object mapping custom template tokens to asset basenames
+    required: false
+    default: "{}"
+
+outputs:
+  staging-dir:
+    description: Directory containing the single verified Formula/ or Casks/ file
+    value: ${{ steps.prepare.outputs.staging-dir }}
+  file:
+    description: Tap-relative path to the rendered delivery
+    value: ${{ steps.prepare.outputs.file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Verify and render from public bytes
+      id: prepare
+      shell: bash
+      env:
+        SOURCE_REPOSITORY: ${{ inputs.source-repository }}
+        RELEASE_ID: ${{ inputs.release-id }}
+        RELEASE_TAG: ${{ inputs.tag }}
+        TAGGED_SOURCE_SHA: ${{ inputs.tagged-source-sha }}
+        DELIVERY_MODE: ${{ inputs.delivery-mode }}
+        SOURCE_PATH: ${{ inputs.source-path }}
+        DELIVERY_NAME: ${{ inputs.delivery-name }}
+        ASSET_SHA256: ${{ inputs.asset-sha256 }}
+        TEMPLATE_ASSET_TOKENS: ${{ inputs.template-asset-tokens }}
+      run: python3 "$GITHUB_ACTION_PATH/prepare.py"

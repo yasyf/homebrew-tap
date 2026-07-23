@@ -1,0 +1,81 @@
+name: Publish an existing Go release to the tap
+
+on:
+  workflow_dispatch:
+    inputs:
+      source-repository:
+        description: Exact public yasyf source repository (owner/name)
+        required: true
+        type: string
+      release-id:
+        description: Exact numeric GitHub release ID
+        required: true
+        type: string
+      tag:
+        description: Exact stable SemVer release tag
+        required: true
+        type: string
+      tagged-source-sha:
+        description: Exact 40-character commit SHA reached by recursively peeling the tag
+        required: true
+        type: string
+      delivery-mode:
+        description: Tagged source contract used to render the tap delivery
+        required: true
+        type: choice
+        options:
+          - formula-template
+          - goreleaser-cask
+      source-path:
+        description: Formula template or GoReleaser config path at tagged-source-sha
+        required: true
+        type: string
+      delivery-name:
+        description: Homebrew delivery name; the output path is derived from this and delivery-mode
+        required: true
+        type: string
+      asset-sha256:
+        description: JSON object mapping every exact public release asset basename to its SHA-256
+        required: true
+        type: string
+      template-asset-tokens:
+        description: Formula-only JSON object mapping custom __TOKENS__ to exact asset basenames
+        required: false
+        default: "{}"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-go-tap-${{ inputs.source-repository }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify the public release and render its tap delivery
+        id: delivery
+        uses: ./.github/actions/public-go-tap-delivery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          source-repository: ${{ inputs.source-repository }}
+          release-id: ${{ inputs.release-id }}
+          tag: ${{ inputs.tag }}
+          tagged-source-sha: ${{ inputs.tagged-source-sha }}
+          delivery-mode: ${{ inputs.delivery-mode }}
+          source-path: ${{ inputs.source-path }}
+          delivery-name: ${{ inputs.delivery-name }}
+          asset-sha256: ${{ inputs.asset-sha256 }}
+          template-asset-tokens: ${{ inputs.template-asset-tokens }}
+
+      - name: Publish only the verified tap delivery
+        uses: yasyf/homebrew-tap/.github/actions/publish@9ca67392d45d66b6ae01e262383c8f3138d56f5e
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          dir: ${{ steps.delivery.outputs.staging-dir }}
+          message: "${{ inputs.delivery-name }} ${{ inputs.tag }}"
