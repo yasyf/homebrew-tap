@@ -567,7 +567,7 @@ jobs:
       # of a completed non-Accepted submission.
       - name: Notarize, staple, and package the Xcode-signed application
         id: package
-        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-app@12b7be700a7c99670a87efabfcdc1bc323575f4f
+        uses: yasyf/homebrew-tap/.github/actions/sign-notarize-app@1666a5363ad6f2ed7ac0be901702e523cc1fba66
         with:
           app: ${{ steps.project.outputs.app }}
           name: ${{ steps.project.outputs.asset-name }}
