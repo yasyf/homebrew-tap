@@ -203,6 +203,7 @@ jobs:
             .github/actions/publish/reject-retired-surfaces.sh
             .github/actions/sign-notarize-app/write-sha256-sidecar.sh
             .github/actions/stage-draft-release/stage.sh
+            .github/actions/tap-delivery/tap-delivery.sh
             .github/test-fixtures/prebuild-hook.sh
           )
           shellcheck "${checked[@]}"
@@ -441,6 +442,117 @@ jobs:
             exit 1
           fi
           test "$(jq -r '.assets | length' "$RUNNER_TEMP/stage-public-conflict/fake-state/state.json")" = 0
+
+  immutable-tap-delivery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Preserve release bytes and reject rebuilt or mutable delivery
+        run: |
+          set -euo pipefail
+          script=.github/actions/tap-delivery/tap-delivery.sh
+          fixture="$RUNNER_TEMP/delivery-fixture"
+          mkdir -p "$fixture/release" "$fixture/tap/Casks"
+          printf 'signed-at-original-time\n' > "$fixture/release/tool.tar.gz"
+          printf 'cask "tool" do\nend\n' > "$fixture/tap/Casks/tool.rb"
+          cp "$fixture/release/tool.tar.gz" "$fixture/original-tool.tar.gz"
+          export DELIVERY_BUNDLE="$fixture/bundle"
+          export DELIVERY_RELEASE_DIR="$fixture/release"
+          export DELIVERY_TAP_DIR="$fixture/tap"
+          export DELIVERY_REPOSITORY=example/project
+          export DELIVERY_SOURCE_SHA=0123456789abcdef0123456789abcdef01234567
+          export DELIVERY_TAG=v1.2.3
+          export DELIVERY_RELEASE_ID=101
+          export DELIVERY_RUN_ID=202
+
+          DELIVERY_MODE=pack bash "$script"
+          cmp "$fixture/original-tool.tar.gz" "$fixture/bundle/release-assets/tool.tar.gz"
+
+          # A failed tap job is allowed to retry only the immutable bundle. A newly
+          # signed build may differ, but it cannot enter or invalidate the delivery.
+          printf 'signed-at-retry-time\n' > "$fixture/release/tool.tar.gz"
+          DELIVERY_MODE=verify bash "$script"
+          cmp "$fixture/original-tool.tar.gz" "$fixture/bundle/release-assets/tool.tar.gz"
+
+          cp "$fixture/bundle/release-assets/tool.tar.gz" "$fixture/saved-tool.tar.gz"
+          printf 'tampered\n' > "$fixture/bundle/release-assets/tool.tar.gz"
+          if DELIVERY_MODE=verify bash "$script"; then
+            echo "::error::tampered release bytes were accepted"
+            exit 1
+          fi
+          cp "$fixture/saved-tool.tar.gz" "$fixture/bundle/release-assets/tool.tar.gz"
+          if DELIVERY_SOURCE_SHA=ffffffffffffffffffffffffffffffffffffffff \
+            DELIVERY_MODE=verify bash "$script"; then
+            echo "::error::mismatched source provenance was accepted"
+            exit 1
+          fi
+
+          mkdir -p "$fixture/symlink-tap/Casks"
+          ln -s "$fixture/tap/Casks/tool.rb" "$fixture/symlink-tap/Casks/tool.rb"
+          if DELIVERY_BUNDLE="$fixture/symlink-bundle" \
+            DELIVERY_TAP_DIR="$fixture/symlink-tap" \
+            DELIVERY_MODE=pack bash "$script"; then
+            echo "::error::symlinked tap input was accepted"
+            exit 1
+          fi
+
+      - name: Require public release identity before a tap-only continuation
+        run: |
+          set -euo pipefail
+          fake_bin="$RUNNER_TEMP/fake-gh-bin"
+          mkdir -p "$fake_bin"
+          cp .github/test-fixtures/fake-gh-release.py "$fake_bin/gh"
+          chmod +x "$fake_bin/gh"
+          printf 'immutable release bytes\n' > "$RUNNER_TEMP/tool.tar.gz"
+          printf '%s\n' "$RUNNER_TEMP/tool.tar.gz" > "$RUNNER_TEMP/assets"
+
+          run_publish() {
+            draft=$1
+            runtime="$RUNNER_TEMP/publish-$draft"
+            mkdir -p "$runtime/fake-state"
+            cp "$RUNNER_TEMP/tool.tar.gz" "$runtime/fake-state/asset-1000"
+            jq -n \
+              --arg path "$runtime/fake-state/asset-1000" \
+              --argjson draft "$draft" '
+                {
+                  list_calls: 0,
+                  post_calls: 0,
+                  releases: [{
+                    id: 201,
+                    tag_name: "v1.2.3",
+                    draft: $draft,
+                    prerelease: false,
+                    html_url: "https://github.com/example/project/releases/tag/v1.2.3",
+                    upload_url: "https://uploads.github.com/repos/example/project/releases/201/assets{?name,label}"
+                  }],
+                  assets: [{id: 1000, name: "tool.tar.gz", path: $path}],
+                  next_asset_id: 1001
+                }
+              ' > "$runtime/fake-state/state.json"
+            env \
+              PATH="$fake_bin:$PATH" \
+              FAKE_GH_SCENARIO=publish \
+              FAKE_GH_STATE="$runtime/fake-state" \
+              GH_TOKEN=test \
+              GITHUB_REPOSITORY=example/project \
+              RELEASE_ID=201 \
+              RELEASE_TAG=v1.2.3 \
+              ASSET_MANIFEST="$RUNNER_TEMP/assets" \
+              RELEASE_PRERELEASE=false \
+              RELEASE_MAKE_LATEST=true \
+              RELEASE_REQUIRE_PUBLISHED=true \
+              RUNNER_TEMP="$runtime" \
+              GITHUB_OUTPUT="$runtime/outputs" \
+              bash .github/actions/publish-draft-release/publish.sh
+          }
+
+          run_publish false
+          grep -Fxq 'url=https://github.com/example/project/releases/tag/v1.2.3' \
+            "$RUNNER_TEMP/publish-false/outputs"
+          if run_publish true; then
+            echo "::error::tap-only continuation accepted a draft release"
+            exit 1
+          fi
 
   inline-shell:
     runs-on: ubuntu-latest

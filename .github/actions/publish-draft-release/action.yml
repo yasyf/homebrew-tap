@@ -22,6 +22,10 @@ inputs:
     description: Whether a stable release becomes the latest release
     required: false
     default: "false"
+  require-published:
+    description: Fail unless the exact release is already public; never publish a draft
+    required: false
+    default: "false"
 
 outputs:
   url:
@@ -40,4 +44,5 @@ runs:
         ASSET_MANIFEST: ${{ inputs.manifest }}
         RELEASE_PRERELEASE: ${{ inputs.prerelease }}
         RELEASE_MAKE_LATEST: ${{ inputs.make-latest }}
+        RELEASE_REQUIRE_PUBLISHED: ${{ inputs.require-published }}
       run: bash "$GITHUB_ACTION_PATH/publish.sh"

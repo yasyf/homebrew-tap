@@ -1,0 +1,49 @@
+name: Preserve immutable tap delivery
+description: Package or verify the exact public-release bytes and Homebrew delivery for a retryable tap job.
+
+inputs:
+  mode:
+    description: pack in the release job or verify in the tap-delivery job
+    required: true
+  bundle:
+    description: Bundle directory to create or verify
+    required: true
+  release-dir:
+    description: Exact release bytes downloaded by stage-draft-release (pack mode)
+    required: false
+    default: ""
+  tap-dir:
+    description: Exact Formula/Cask staging directory (pack mode)
+    required: false
+    default: ""
+  repository:
+    description: Exact owner/repository identity
+    required: true
+  source-sha:
+    description: Exact 40-character source commit
+    required: true
+  tag:
+    description: Exact release tag
+    required: true
+  release-id:
+    description: Exact numeric GitHub release identity
+    required: true
+  run-id:
+    description: Exact numeric Actions run identity
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        DELIVERY_MODE: ${{ inputs.mode }}
+        DELIVERY_BUNDLE: ${{ inputs.bundle }}
+        DELIVERY_RELEASE_DIR: ${{ inputs.release-dir }}
+        DELIVERY_TAP_DIR: ${{ inputs.tap-dir }}
+        DELIVERY_REPOSITORY: ${{ inputs.repository }}
+        DELIVERY_SOURCE_SHA: ${{ inputs.source-sha }}
+        DELIVERY_TAG: ${{ inputs.tag }}
+        DELIVERY_RELEASE_ID: ${{ inputs.release-id }}
+        DELIVERY_RUN_ID: ${{ inputs.run-id }}
+      run: bash "$GITHUB_ACTION_PATH/tap-delivery.sh"

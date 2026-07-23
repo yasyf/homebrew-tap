@@ -33,6 +33,10 @@ case "${RELEASE_MAKE_LATEST:-}" in
   true|false) ;;
   *) fail "make-latest must be true or false" ;;
 esac
+case "${RELEASE_REQUIRE_PUBLISHED:-false}" in
+  true|false) ;;
+  *) fail "require-published must be true or false" ;;
+esac
 [ "$RELEASE_PRERELEASE" != true ] || [ "$RELEASE_MAKE_LATEST" != true ] \
   || fail "a prerelease cannot be the latest stable release"
 
@@ -57,6 +61,8 @@ gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > "$state"
 [ "$(jq -r .tag_name "$state")" = "$RELEASE_TAG" ] || fail "release ID does not match tag"
 [ "$(jq -r .prerelease "$state")" = "$RELEASE_PRERELEASE" ] \
   || fail "release prerelease state does not match"
+[ "$RELEASE_REQUIRE_PUBLISHED" != true ] || [ "$(jq -r .draft "$state")" = false ] \
+  || fail "release must already be public"
 assert_unique_release "$(jq -r .draft "$state")"
 
 rows="$RUNNER_TEMP/publish-release-asset-rows"
