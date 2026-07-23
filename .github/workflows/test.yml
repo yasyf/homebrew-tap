@@ -105,7 +105,7 @@ jobs:
           fi
 
           go=.github/workflows/release-go.yml
-          manifest_pin=eb73d87f6b53a71f49d846ec28756ea243970d45
+          manifest_pin=bd8e25ab658e40ce49e7f904dfc9953e1cbf9d80
           draft_pin=54e3e194bda69896894a82c17fcdb2822beefab5
           publish_pin=9ca67392d45d66b6ae01e262383c8f3138d56f5e
           test "$(grep -Ec "actions/go-release-manifest@${manifest_pin}$" "$go")" = 1
@@ -113,6 +113,10 @@ jobs:
           test "$(grep -Ec "actions/publish-draft-release@${draft_pin}$" "$go")" = 1
           test "$(grep -Ec "actions/publish@${publish_pin}$" "$go")" = 2
           grep -Fq 'goreleaser release --clean --skip=publish' "$go"
+          if grep -Fq 'name: Verify local release checksums' "$go"; then
+            echo "::error::release-go must delegate checksum verification to the exact manifest action"
+            exit 1
+          fi
           grep -Fq "auto-tag release commit \$SHA is not an ancestor of \$DEFAULT_BRANCH" "$go"
           version_ref="version: \$"
           version_ref+='{{ steps.tag.outputs.version }}'

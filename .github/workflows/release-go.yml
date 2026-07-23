@@ -284,20 +284,10 @@ jobs:
           }
 
       - name: Record the exact release asset manifest
-        uses: yasyf/homebrew-tap/.github/actions/go-release-manifest@eb73d87f6b53a71f49d846ec28756ea243970d45
+        uses: yasyf/homebrew-tap/.github/actions/go-release-manifest@bd8e25ab658e40ce49e7f904dfc9953e1cbf9d80
         with:
           artifacts: dist/artifacts.json
           output: ${{ runner.temp }}/go-release-assets
-
-      - name: Verify local release checksums
-        run: |
-          set -euo pipefail
-          while IFS= read -r checksum; do
-            (
-              cd "$(dirname "$checksum")"
-              shasum -a 256 -c "$(basename "$checksum")"
-            )
-          done < <(jq -r '.[] | select(.type == "Checksum") | .path' dist/artifacts.json)
 
       - name: Stage and verify the complete draft release
         id: draft
