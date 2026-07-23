@@ -45,7 +45,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: public-go-tap-${{ inputs.source-repository }}
@@ -76,6 +76,6 @@ jobs:
       - name: Publish only the verified tap delivery
         uses: yasyf/homebrew-tap/.github/actions/publish@9ca67392d45d66b6ae01e262383c8f3138d56f5e
         with:
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          token: ${{ github.token }}
           dir: ${{ steps.delivery.outputs.staging-dir }}
           message: "${{ inputs.delivery-name }} ${{ inputs.tag }}"
