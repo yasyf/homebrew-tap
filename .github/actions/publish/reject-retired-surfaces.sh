@@ -14,7 +14,9 @@ reject_content() {
   shift 2
   roots=()
   for path in "$@"; do
-    [ ! -e "$path" ] && [ ! -L "$path" ] || roots+=("$path")
+    if [ -e "$path" ] || [ -L "$path" ]; then
+      roots+=("$path")
+    fi
   done
   [ "${#roots[@]}" -gt 0 ] || return 0
   if grep -RIlE "$regex" "${roots[@]}" >/dev/null 2>&1; then
@@ -30,8 +32,9 @@ for path in \
   Casks/cc-notes-holder.rb \
   Casks/cc-notes-helper.rb \
   Casks/cc-pool-status.rb; do
-  [ ! -e "$root/$path" ] && [ ! -L "$root/$path" ] \
-    || fail "retired standalone runtime file exists: $path"
+  if [ -e "$root/$path" ] || [ -L "$root/$path" ]; then
+    fail "retired standalone runtime file exists: $path"
+  fi
 done
 
 reject_content \
