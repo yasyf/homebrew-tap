@@ -55,7 +55,7 @@ jobs:
           set -euo pipefail
           workflow=.github/workflows/publish-go-tap.yml
           action=.github/actions/public-go-tap-delivery
-          publish_pin=9ca67392d45d66b6ae01e262383c8f3138d56f5e
+          publish_pin=9525763796fce4d1042cf3393d9479f791908eaa
 
           test "$(grep -Ec '^  workflow_dispatch:$' "$workflow")" = 1
           if sed -n '/^on:$/,/^permissions:$/p' "$workflow" \
@@ -159,7 +159,7 @@ jobs:
             echo "::error::release-swift must use the exact-ID draft actions"
             exit 1
           fi
-          publish_pin=9ca67392d45d66b6ae01e262383c8f3138d56f5e
+          publish_pin=9525763796fce4d1042cf3393d9479f791908eaa
           immutable_pin=c70d7e51bdb512db2a73d054e3a94afe0a61eedb
           test "$(grep -Ec "actions/stage-draft-release@${stage_pin}$" "$swift")" = 1
           test "$(grep -Ec "actions/publish-draft-release@${draft_pin}$" "$swift")" = 1

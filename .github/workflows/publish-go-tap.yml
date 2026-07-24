@@ -74,7 +74,7 @@ jobs:
           template-asset-tokens: ${{ inputs.template-asset-tokens }}
 
       - name: Publish only the verified tap delivery
-        uses: yasyf/homebrew-tap/.github/actions/publish@9ca67392d45d66b6ae01e262383c8f3138d56f5e
+        uses: yasyf/homebrew-tap/.github/actions/publish@9525763796fce4d1042cf3393d9479f791908eaa
         with:
           token: ${{ github.token }}
           dir: ${{ steps.delivery.outputs.staging-dir }}
