@@ -18,8 +18,8 @@
 # every tagged release — do not hand-edit; change the template at cookiesync's
 # .github/cask/cookiesync.rb.tmpl instead.
 cask "cookiesync" do
-  version "0.22.0"
-  sha256 "bf19967c4f5614149999057cfc6e71ebf813c8623d89c7832170daa75419e9fb" # app
+  version "0.26.0"
+  sha256 "8d9cdc44634cd11307916a835543e9e02debbe8e8ee472344a0ba77ffbc9cf42" # app
 
   url "https://github.com/yasyf/cookiesync/releases/download/v#{version}/CookieSync-v#{version}-darwin.zip"
   name "cookiesync"
@@ -36,7 +36,9 @@ cask "cookiesync" do
   # into the bundle and tccd keys the grant to the bundle identifier.
   binary "CookieSync.app/Contents/MacOS/cookiesync"
 
-  # The .app is notarized + stapled, so Gatekeeper validates it offline.
+  # The .app is notarized + stapled, so Gatekeeper clears it offline; the recursive
+  # quarantine strip on the bundle keeps a first exec friction-free even if the staple
+  # check is skipped.
   #
   # brew upgrade swaps the staged bundle on disk but never touches launchd, so the
   # resident helper (com.github.yasyf.synckit.helper.cookiesync) keeps serving the old
@@ -44,6 +46,9 @@ cask "cookiesync" do
   # must_succeed: false keeps first install a no-op — the agent only exists after
   # `cookiesync install` + `synckitd install`.
   postflight do
+    system_command "/usr/bin/xattr",
+                   args:         ["-dr", "com.apple.quarantine", "#{staged_path}/CookieSync.app"],
+                   must_succeed: false
     system_command "/bin/launchctl",
                    args:         ["kickstart", "-k", "gui/#{Process.uid}/com.github.yasyf.synckit.helper.cookiesync"],
                    must_succeed: false,
