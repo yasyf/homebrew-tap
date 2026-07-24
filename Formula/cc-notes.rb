@@ -1,6 +1,5 @@
 # Homebrew formula for cc-notes. Installs the prebuilt binary for the current
 # platform from cc-notes' GitHub Releases — no Go toolchain needed.
-# `brew install --HEAD` builds (pure Go) from source instead.
 #
 #   brew install yasyf/tap/cc-notes
 #
@@ -12,7 +11,7 @@
 class CcNotes < Formula
   desc "Git-native notes and tasks layer for agents"
   homepage "https://github.com/yasyf/cc-notes"
-  version "0.45.0"
+  version "0.46.0"
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -20,43 +19,52 @@ class CcNotes < Formula
     strategy :github_latest
   end
 
-  head do
-    url "https://github.com/yasyf/cc-notes.git", branch: "main"
-    depends_on "go" => :build
-  end
-
   on_macos do
+    resource "helper" do
+      url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes-helper-v#{version}-darwin.zip"
+      sha256 "ac6dfd92374c6be4492d30231fe05d3bc3d95247fb93a5bdd0ff35f86d6366cb"
+    end
+
     on_arm do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_arm64"
-      sha256 "3b5778ef8421adfcf2d794248def1a5a7468c833daf288dac1187daf9e93ddc4"
+      sha256 "78948f16a8603571570683102014bb45b63936fcc5e15c6b5201a313f01676d9"
     end
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_amd64"
-      sha256 "8b27515422ae35ee3b756b1ed18232e19f75c968bf65c27f9f455e3c0b15bffb"
+      sha256 "4f4983be83d959039285c27747a4b0a87b7a354b8eba12b8cb6c1a1bef4f0337"
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_amd64"
-      sha256 "ec503ec5a8824ed348d0b98705328967f25211dbdbb593f2eea9e20e7fc62a9c"
+      sha256 "c419604e4893a5f82e6a3dad76497ab039610f824dc2957a59b80d5cd7ae7e0a"
     end
     on_arm do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_arm64"
-      sha256 "6fdef0920ce83ff916d55b2f47b8da78e31eb6cd54f8bb92a936750ad2ae0ab4"
+      sha256 "700929f8a05fb575534d9a4fffe622f3f3c72f7e4dbd0372677831d041cb7c9e"
     end
   end
 
   def install
-    if build.head?
-      ENV["CGO_ENABLED"] = "0"
-      ldflags = "-s -w -X github.com/yasyf/cc-notes/internal/version.Version=#{version}"
-      system "go", "build", *std_go_args(ldflags: ldflags, output: bin/"cc-notes"), "./cmd/cc-notes"
-    else
-      # The release asset is a bare binary staged under its asset name.
-      bin.install Dir["cc-notes_*"].first => "cc-notes"
+    # The release asset is a bare binary staged under its asset name.
+    bin.install Dir["cc-notes_*"].first => "cc-notes"
+    if OS.mac?
+      resource("helper").stage do
+        system "/usr/bin/codesign", "--verify", "--strict", "--verbose=2", "CCNotesHelper.app"
+        libexec.install "CCNotesHelper.app"
+      end
     end
     bin.install_symlink "cc-notes" => "ccn"
+  end
+
+  def caveats
+    return if OS.linux?
+
+    <<~EOS
+      Install and activate the fixed signed helper explicitly:
+        cc-notes package install
+    EOS
   end
 
   test do
