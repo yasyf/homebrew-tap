@@ -829,9 +829,18 @@ jobs:
           staged="$RUNNER_TEMP/retired-staging"
           mkdir -p "$staged/Casks" "$staged/Formula"
           "$guard" "$staged"
+          printf 'resource "helper" do\n  url "https://example.invalid/cc-notes-helper-v1.0.0-darwin.zip"\nend\n' \
+            > "$staged/Formula/cc-notes.rb"
+          "$guard" "$staged"
           printf 'cask "renamed" do\n  app "CCPoolStatus.app"\nend\n' > "$staged/Casks/renamed.rb"
           if "$guard" "$staged"; then
             echo "::error::retired CCPoolStatus cask content passed the staged guard"
+            exit 1
+          fi
+          rm "$staged/Casks/renamed.rb"
+          printf 'cask "cc-notes-helper" do\n  app "CCNotesHelper.app"\nend\n' > "$staged/Casks/renamed.rb"
+          if "$guard" "$staged"; then
+            echo "::error::retired cc-notes helper cask content passed the staged guard"
             exit 1
           fi
           rm "$staged/Casks/renamed.rb"

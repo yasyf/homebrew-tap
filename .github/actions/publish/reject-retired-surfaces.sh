@@ -39,8 +39,12 @@ done
 
 reject_content \
   "retired standalone FuseKit runtime content" \
-  'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app|cc-notes-helper|com\.yasyf\.cc-notes\.helper|CCNotesHelper\.app' \
+  'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app' \
   "$root/Casks" "$root/Formula"
+reject_content \
+  "retired standalone cc-notes helper cask content" \
+  'cc-notes-helper|com\.yasyf\.cc-notes\.helper|CCNotesHelper\.app' \
+  "$root/Casks"
 reject_content \
   "retired standalone CCPoolStatus cask content" \
   'cc-pool-status|CCPoolStatus\.app|com\.yasyf\.cc-pool\.status' \
