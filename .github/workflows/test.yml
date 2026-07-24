@@ -26,8 +26,17 @@ jobs:
           test ! -e Casks/fusekit-holder.rb
           test ! -e Casks/cc-notes-holder.rb
           test ! -e Casks/cc-notes-helper.rb
-          if grep -RInE 'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app|cc-notes-helper|com\.yasyf\.cc-notes\.helper|CCNotesHelper\.app' Casks Formula; then
+          test ! -e Casks/cc-pool-status.rb
+          if grep -RInE 'fusekit-holder|com\.yasyf\.fusekit-holder|cc-notes-holder|CCNotesHolder\.app' Casks Formula; then
             echo "::error::a standalone FuseKit runtime app returned to the tap"
+            exit 1
+          fi
+          if grep -RInE 'cc-notes-helper|com\.yasyf\.cc-notes\.helper|CCNotesHelper\.app' Casks; then
+            echo "::error::a standalone cc-notes helper cask returned to the tap"
+            exit 1
+          fi
+          if grep -RInE 'cc-pool-status|CCPoolStatus\.app|com\.yasyf\.cc-pool\.status' Casks; then
+            echo "::error::a standalone cc-pool status cask returned to the tap"
             exit 1
           fi
 
