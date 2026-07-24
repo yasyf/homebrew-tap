@@ -193,6 +193,19 @@ jobs:
           product: ${{ inputs.product }}
           package-path: ${{ inputs.package-path }}
 
+      - name: Verify the built binary reports the release version
+        env:
+          BINARY: ${{ steps.build.outputs.binary }}
+          EXPECTED_VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          actual="$("$BINARY" --version)"
+          if [ "$actual" != "$EXPECTED_VERSION" ]; then
+            echo "::error::$BINARY --version reported '$actual'; release tag requires '$EXPECTED_VERSION'"
+            exit 1
+          fi
+          echo "verified release version: $actual"
+
       - name: Sign, notarize, and package
         id: pkg
         uses: yasyf/homebrew-tap/.github/actions/sign-notarize-binary@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
