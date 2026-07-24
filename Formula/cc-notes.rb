@@ -11,7 +11,7 @@
 class CcNotes < Formula
   desc "Git-native notes and tasks layer for agents"
   homepage "https://github.com/yasyf/cc-notes"
-  version "0.46.1"
+  version "0.46.2"
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -21,28 +21,28 @@ class CcNotes < Formula
 
   on_macos do
     resource "helper" do
-      url "https://github.com/yasyf/cc-notes/releases/download/v0.46.1/cc-notes-helper-v0.46.1-darwin.zip"
-      sha256 "846afea330d727d7930385d219cb1f82ab589899dd845aebd4cef6811309afc8"
+      url "https://github.com/yasyf/cc-notes/releases/download/v0.46.2/cc-notes-helper-v0.46.2-darwin.zip", using: :nounzip
+      sha256 "c34a1f810c29b3f1738bccf1b9a97c394555d3ad0ce7cd38406aa356ddf209b7"
     end
 
     on_arm do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_arm64"
-      sha256 "1653f0bd7bc669b3050c87c7f68940f22e76194308cd3bdc58acec107e937357"
+      sha256 "0c75aa0ce97c368bd10e2e152fd33e3f02b6d8942d2799a0fb1d398dc0889449"
     end
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_amd64"
-      sha256 "f7775e4f7acfd0fd282cef4367c7a0e2ae746011abfbec7c4d8f549076e88b25"
+      sha256 "58dd9637f28c66af4e9c82712a55730ad44f4fdf78246f60ede2d2ac0e19e043"
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_amd64"
-      sha256 "e6791513762a3895bb52ea338737ca90c2a836f2c16416ad1f29b4b47bf9d08f"
+      sha256 "7d1144b04b521dd572a8f77bbaf8980ce968c99de14fbd9e9d9b35a8686cf44e"
     end
     on_arm do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_arm64"
-      sha256 "512d02c8d6fd06a59361a7e5e6aec6564d289e8dfbed3ec72462143f12833675"
+      sha256 "ddc05d6b94f79dfd2af45f53c1109b6797df4afcf10e3fa0d271634e1cf796cf"
     end
   end
 
@@ -51,6 +51,7 @@ class CcNotes < Formula
     bin.install Dir["cc-notes_*"].first => "cc-notes"
     if OS.mac?
       resource("helper").stage do
+        system "/usr/bin/ditto", "-x", "-k", resource("helper").cached_download, "."
         system "/usr/bin/codesign", "--verify", "--strict", "--verbose=2", "CCNotesHelper.app"
         libexec.install "CCNotesHelper.app"
       end
