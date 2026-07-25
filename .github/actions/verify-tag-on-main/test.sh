@@ -30,6 +30,7 @@ signing_fingerprint="$(generate_key "$signing_home" "Fleet Test <fleet@example.i
 wrong_fingerprint="$(generate_key "$wrong_home" "Wrong Test <wrong@example.invalid>")"
 trusted_key="$work/trusted.asc"
 gpg --batch --homedir "$signing_home" --armor --export "$signing_fingerprint" >"$trusted_key"
+gpg --batch --homedir "$wrong_home" --armor --export "$wrong_fingerprint" >>"$trusted_key"
 
 git init -q --bare "$work/origin.git"
 git clone -q "$work/origin.git" "$work/repo"
@@ -95,7 +96,7 @@ git push -q origin refs/tags/v1.2.5
 expect_failure v1.2.5 "$main_sha" "signature verification failed"
 
 create_signed_tag v1.2.6 "$wrong_home" "$wrong_fingerprint" "$main_sha"
-expect_failure v1.2.6 "$main_sha" "signature verification failed"
+expect_failure v1.2.6 "$main_sha" "is not signed by trusted key"
 
 git switch -qc side
 printf 'side\n' >>fixture.txt
