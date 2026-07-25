@@ -1,10 +1,11 @@
 name: Verify tag on main
 description: >-
-  Coherence gate for a tag-triggered release, run before any build or publish.
-  Fails unless the remote ref is an annotated, GitHub-verified signed tag over the
-  checked-out commit on main, or — when plugin-manifest is set — when the tag does
-  not match the manifest's version. Requires a prior
-  actions/checkout with fetch-depth: 0 so merge-base can reach the common ancestor.
+  Trust gate for a tag-triggered release, run before any build or publish.
+  Requires one annotated tag object signed by the fleet release key, directly naming
+  github.sha on main. GitHub API verification and local git/GPG verification must
+  independently agree. Also rejects remote tag movement and, when plugin-manifest
+  is set, a tag that does not match the manifest version. Requires a prior checkout
+  with fetch-depth: 0.
 
 inputs:
   plugin-manifest:
@@ -27,42 +28,5 @@ runs:
         TRUSTED_RELEASE_FINGERPRINT: F3299DE3FE0F6C3CF2B66BFBF7ECDD88A700D73A
       run: |
         set -euo pipefail
-        TAG="${GITHUB_REF_NAME}"
-        SHA="${GITHUB_SHA}"
-        MANIFEST="${PLUGIN_MANIFEST:-}"
-
-        # (1) The tagged commit must be reachable from main.
-        git fetch --no-tags --quiet origin main
-        if git merge-base --is-ancestor "$SHA" FETCH_HEAD; then
-          echo "✓ ${TAG} (${SHA}) is on main."
-        else
-          echo "::error title=Tag not on main::${TAG} points at ${SHA}, which is not on main. Only commits on main can be released — tag a commit that has landed on main (e.g. git tag ${TAG} origin/main), then push the tag."
-          exit 1
-        fi
-
-        # (2) GitHub must expose an annotated, verified signed tag object whose
-        # exact name and commit target match this immutable release run.
         python3 "${ACTION_PATH}/verify.py"
-
-        # (3) Opt-in: when a plugin manifest path is passed, the tag must equal v<.version>.
-        if [ -n "$MANIFEST" ]; then
-          if [ ! -f "$MANIFEST" ]; then
-            echo "::error title=Manifest not found::plugin-manifest is set to '${MANIFEST}' but no such file exists at ${SHA}."
-            exit 1
-          fi
-          version="$(jq -er '.version' "$MANIFEST" 2>/dev/null || true)"
-          if [ -z "$version" ] || [ "$version" = "null" ]; then
-            version="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$MANIFEST" 2>/dev/null || true)"
-          fi
-          if [ -z "$version" ] || [ "$version" = "null" ]; then
-            echo "::error title=Manifest version unreadable::could not read a top-level string \"version\" from ${MANIFEST}."
-            exit 1
-          fi
-          if [ "$TAG" != "v${version}" ]; then
-            echo "::error title=Tag/manifest mismatch::${TAG} does not match ${MANIFEST} version v${version} at ${SHA}. The tag is likely on a commit that predates the version bump, or reuses an already-released version. Do NOT delete and re-push ${TAG} — immutable-point-tag rulesets reject it. Set \"version\" to ${TAG#v} in a commit on main (or bump it) and cut a NEW tag matching the manifest version."
-            exit 1
-          fi
-          echo "✓ ${TAG} matches ${MANIFEST} version v${version}."
-        else
-          echo "· no plugin-manifest input; skipping tag/manifest coherence check."
-        fi
+        "${ACTION_PATH}/verify.sh"
