@@ -397,6 +397,8 @@ jobs:
             .github/actions/sign-notarize-app/write-sha256-sidecar.sh
             .github/actions/stage-draft-release/stage.sh
             .github/actions/tap-delivery/tap-delivery.sh
+            .github/actions/verify-tag-on-main/test.sh
+            .github/actions/verify-tag-on-main/verify.sh
             .github/test-fixtures/prebuild-hook.sh
           )
           shellcheck "${checked[@]}"
