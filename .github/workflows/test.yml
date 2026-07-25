@@ -74,6 +74,12 @@ jobs:
             .github/workflows/release-swift.yml; do
             test "$(grep -Ec "verify-tag-on-main@${verifier_pin}$" "$workflow")" = 1
           done
+  signed-release-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Reject every inexact or untrusted tag shape
+        run: .github/actions/verify-tag-on-main/test.sh
 
   public-go-tap-contract:
     runs-on: ubuntu-latest

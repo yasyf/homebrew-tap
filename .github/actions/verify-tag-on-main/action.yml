@@ -10,22 +10,21 @@ inputs:
   plugin-manifest:
     description: >-
       Path to a Claude plugin manifest (plugin.json) whose top-level "version" must
-      equal the tag without its leading "v". Empty (default) disables the check, so
-      non-plugin consumers, and plugin repos whose manifest version is decoupled from
-      the release tag, are unaffected. Opt in only when the tag tracks the manifest
-      (e.g. plugin/.claude-plugin/plugin.json).
+      equal the tag without its leading "v". Empty (default) disables the check.
     required: false
     default: ""
 
 runs:
   using: composite
   steps:
-    - name: Assert tag/commit/manifest coherence
+    - name: Verify the exact signed annotated release tag
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
         GITHUB_TOKEN: ${{ github.token }}
         PLUGIN_MANIFEST: ${{ inputs.plugin-manifest }}
+        TRUSTED_RELEASE_KEY: ${{ github.action_path }}/release-signing-key.asc
+        TRUSTED_RELEASE_FINGERPRINT: F3299DE3FE0F6C3CF2B66BFBF7ECDD88A700D73A
       run: |
         set -euo pipefail
         TAG="${GITHUB_REF_NAME}"
