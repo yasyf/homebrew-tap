@@ -11,7 +11,7 @@
 class CcNotes < Formula
   desc "Git-native notes and tasks layer for agents"
   homepage "https://github.com/yasyf/cc-notes"
-  version "0.46.2"
+  version "0.46.3"
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -21,30 +21,32 @@ class CcNotes < Formula
 
   on_macos do
     resource "helper" do
-      url "https://github.com/yasyf/cc-notes/releases/download/v0.46.2/cc-notes-helper-v0.46.2-darwin.zip", using: :nounzip
-      sha256 "c34a1f810c29b3f1738bccf1b9a97c394555d3ad0ce7cd38406aa356ddf209b7"
+      url "https://github.com/yasyf/cc-notes/releases/download/v0.46.3/cc-notes-helper-v0.46.3-darwin.zip", using: :nounzip
+      sha256 "53f867ce11f3ffb2aab9a6342ff2ca7d66d2c0a6cb9987efdf8f3ecc219dde83"
     end
 
     on_arm do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_arm64"
-      sha256 "0c75aa0ce97c368bd10e2e152fd33e3f02b6d8942d2799a0fb1d398dc0889449"
+      sha256 "29d5f96d32d376d3ad2fbbdaf328563b2f373c55d9543be2fec2cd6809ac9bf0"
     end
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_amd64"
-      sha256 "58dd9637f28c66af4e9c82712a55730ad44f4fdf78246f60ede2d2ac0e19e043"
+      sha256 "5d4febb17afee0365877253bfa4adf71c814676c0dd165c211f293c392fb7fc2"
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_amd64"
-      sha256 "7d1144b04b521dd572a8f77bbaf8980ce968c99de14fbd9e9d9b35a8686cf44e"
+      sha256 "4c0007715c905ebae87a03ddd76704ced02e11344b4cca0cec407759b583cd6d"
     end
     on_arm do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_arm64"
-      sha256 "ddc05d6b94f79dfd2af45f53c1109b6797df4afcf10e3fa0d271634e1cf796cf"
+      sha256 "5b57738534d1028f5050fea561c26ada4ca329e174053be0baa7e73a1fca1369"
     end
   end
+
+  preserve_rpath
 
   def install
     # The release asset is a bare binary staged under its asset name.
@@ -71,5 +73,9 @@ class CcNotes < Formula
   test do
     # Release binaries print "<tag> (<commit>)", e.g. "v0.2.0 (ab12cd3)".
     assert_match version.to_s, shell_output("#{bin}/cc-notes version")
+    if OS.mac?
+      system "/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", libexec/"CCNotesHelper.app"
+      system "/usr/bin/xcrun", "stapler", "validate", libexec/"CCNotesHelper.app"
+    end
   end
 end
