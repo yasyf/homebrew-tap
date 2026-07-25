@@ -10,8 +10,8 @@
 class CcSquash < Formula
   desc "Augmented auto-compaction for long-running Claude Code sessions"
   homepage "https://github.com/yasyf/cc-squash"
-  url "https://github.com/yasyf/cc-squash/releases/download/v0.11.0/cc-squash-v0.11.0-darwin-universal.tar.gz"
-  sha256 "632c1a12eed653c739426722f2ffe34d6e4eb9009e6cddaa2d1a3ce9d47a2081"
+  url "https://github.com/yasyf/cc-squash/releases/download/v0.11.1/cc-squash-v0.11.1-darwin-universal.tar.gz"
+  sha256 "6344758d334f8f207c533b318bc4434234718fbf9b178642891a552ccae8d0e8"
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
