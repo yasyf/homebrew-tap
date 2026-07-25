@@ -23,6 +23,7 @@ runs:
     - name: Assert tag/commit/manifest coherence
       shell: bash
       env:
+        ACTION_PATH: ${{ github.action_path }}
         GITHUB_TOKEN: ${{ github.token }}
         PLUGIN_MANIFEST: ${{ inputs.plugin-manifest }}
       run: |
@@ -42,7 +43,7 @@ runs:
 
         # (2) GitHub must expose an annotated, verified signed tag object whose
         # exact name and commit target match this immutable release run.
-        python3 "${{ github.action_path }}/verify.py"
+        python3 "${ACTION_PATH}/verify.py"
 
         # (3) Opt-in: when a plugin manifest path is passed, the tag must equal v<.version>.
         if [ -n "$MANIFEST" ]; then
