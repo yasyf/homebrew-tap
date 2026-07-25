@@ -1,6 +1,5 @@
 # Homebrew formula for cc-pool. Installs the prebuilt universal binary from
-# GitHub Releases — no Go toolchain needed. `brew install --HEAD` builds from
-# source instead.
+# GitHub Releases — no Go toolchain needed.
 #
 #   brew install yasyf/tap/cc-pool
 #
@@ -12,8 +11,8 @@
 class CcPool < Formula
   desc "Predictive multi-account load-balancing for Claude Code"
   homepage "https://github.com/yasyf/cc-pool"
-  url "https://github.com/yasyf/cc-pool/releases/download/v0.63.2/cc-pool-v0.63.2-darwin-universal.tar.gz"
-  sha256 "b554e012213b9b4d43eedfc5483bf485fb6f859cb66cbf02099558fc0e824784" # pure
+  url "https://github.com/yasyf/cc-pool/releases/download/v0.64.4/cc-pool-v0.64.4-darwin-universal.tar.gz"
+  sha256 "5519679e91edd9612039cee8675b6e7e12d5eab0cdbe6191e11c741c7921762d" # pure
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -21,41 +20,44 @@ class CcPool < Formula
     strategy :github_latest
   end
 
-  head do
-    url "https://github.com/yasyf/cc-pool.git", branch: "main"
-    depends_on "go" => :build
-  end
-
   depends_on :macos
+  preserve_rpath
+
+  resource "status_app" do
+    url "https://github.com/yasyf/cc-pool/releases/download/v0.64.4/cc-pool-status-v0.64.4-darwin.zip", using: :nounzip
+    sha256 "c42df816dd2c78cda635a6161af926475b9a8c7490074714c997d9510c38e05b"
+  end
 
   def install
-    if build.head?
-      install_from_source
-    else
-      bin.install "cc-pool"
+    bin.install "cc-pool"
+    resource("status_app").stage do
+      system "/usr/bin/ditto", "-x", "-k", resource("status_app").cached_download, "."
+      staged_app = Pathname("CCPoolStatus.app")
+      odie "staged status app is missing" unless staged_app.directory?
+      odie "staged status app has no Contents" unless (staged_app/"Contents").directory?
+      system "/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", staged_app
+      system "/usr/bin/xcrun", "stapler", "validate", staged_app
+      system "/usr/sbin/spctl", "--assess", "--type", "execute", "--verbose=4", staged_app
+      app_version = Utils.safe_popen_read(
+        "/usr/libexec/PlistBuddy", "-c", "Print :CFBundleShortVersionString",
+        staged_app/"Contents/Info.plist"
+      ).strip
+      odie "CCPoolStatus.app version #{app_version} does not match #{version}" if app_version != version.to_s
+      libexec.install staged_app
     end
     bin.install_symlink "cc-pool" => "ccp"
-  end
-
-  # HEAD builds compile pure Go from source.
-  def install_from_source
-    ldflags = %W[
-      -s -w
-      -X github.com/yasyf/cc-pool/internal/version.Version=#{version}
-    ]
-    args = std_go_args(ldflags: ldflags.join(" "), output: bin/"cc-pool")
-    ENV["CGO_ENABLED"] = "0"
-    system "go", "build", *args, "./cmd/cc-pool"
   end
 
   def caveats
     <<~EOS
       Get started:
+        ccp package install # install and activate this release's signed application
+        ccp service install # install and start the account daemon
         ccp             # walks you through pooling your subscriptions
         ccp run         # launch claude on the emptiest account
 
-      `ccp init`, `ccp widget`, and `ccp service install` reconcile the exact
-      signed CCPoolStatus app from the same release into:
+      `ccp package install` verifies the formula's exact signed application,
+      installs it outside Homebrew's sandbox into:
         ~/Applications/CCPoolStatus.app
 
       daemonkit owns the user LaunchAgent. Homebrew does not install or control
@@ -63,8 +65,8 @@ class CcPool < Formula
 
       Plain `claude` on ~/.claude keeps working untouched.
 
-      Before `brew uninstall`, run `ccp service uninstall` to stop the daemon
-      and stop active pool sessions.
+      Before `brew uninstall`, run `ccp service uninstall` and then
+      `ccp package uninstall`.
     EOS
   end
 
