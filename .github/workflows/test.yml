@@ -55,6 +55,17 @@ jobs:
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
 
+  verify-tag-on-main-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise strict signed-tag verification
+        run: |
+          set -euo pipefail
+          action=.github/actions/verify-tag-on-main
+          python3 -m py_compile "$action/verify.py" "$action/test_verify.py"
+          python3 "$action/test_verify.py"
+
   public-go-tap-contract:
     runs-on: ubuntu-latest
     steps:

@@ -1,9 +1,9 @@
 name: Verify tag on main
 description: >-
   Coherence gate for a tag-triggered release, run before any build or publish.
-  Fails when the tagged commit (github.sha) is not on main, when the remote tag has
-  been retargeted away from the checked-out commit, or — when plugin-manifest is set
-  — when the tag does not match the manifest's version. Requires a prior
+  Fails unless the remote ref is an annotated, GitHub-verified signed tag over the
+  checked-out commit on main, or — when plugin-manifest is set — when the tag does
+  not match the manifest's version. Requires a prior
   actions/checkout with fetch-depth: 0 so merge-base can reach the common ancestor.
 
 inputs:
@@ -23,6 +23,7 @@ runs:
     - name: Assert tag/commit/manifest coherence
       shell: bash
       env:
+        GITHUB_TOKEN: ${{ github.token }}
         PLUGIN_MANIFEST: ${{ inputs.plugin-manifest }}
       run: |
         set -euo pipefail
@@ -39,17 +40,9 @@ runs:
           exit 1
         fi
 
-        # (2) The remote tag must still point at the checked-out commit (else retarget/race).
-        # The peeled (^{}) ref resolves an annotated tag; a lightweight tag falls back.
-        remote_target="$(git ls-remote origin "refs/tags/${TAG}^{}" | awk 'NR==1{print $1}')"
-        if [ -z "$remote_target" ]; then
-          remote_target="$(git ls-remote origin "refs/tags/${TAG}" | awk 'NR==1{print $1}')"
-        fi
-        if [ -n "$remote_target" ] && [ "$remote_target" != "$SHA" ]; then
-          echo "::error title=Tag retargeted::${TAG} points at ${remote_target} on origin but this run checked out ${SHA}. The tag moved after the release started. Do NOT delete and re-push ${TAG} — immutable-point-tag rulesets reject it and a moved tag breaks anyone who already fetched it. Cut a NEW patch tag at the intended commit instead."
-          exit 1
-        fi
-        echo "✓ ${TAG} still points at ${SHA} on origin."
+        # (2) GitHub must expose an annotated, verified signed tag object whose
+        # exact name and commit target match this immutable release run.
+        python3 "${{ github.action_path }}/verify.py"
 
         # (3) Opt-in: when a plugin manifest path is passed, the tag must equal v<.version>.
         if [ -n "$MANIFEST" ]; then
