@@ -12,8 +12,8 @@
 # here on every tagged release — do not hand-edit; change the template at
 # .github/cask/cc-vigil.rb.tmpl in cc-vigil instead.
 cask "cc-vigil" do
-  version "0.13.0"
-  sha256 "a369896825134c26e1f1feb875ef14d7b13907948cd1191d020ac98e4a5d49f1"
+  version "0.13.1"
+  sha256 "a27a7ea58a2b216fef217c5746623217b69edbde1932232eab0a1d8cb7cd9811"
 
   url "https://github.com/yasyf/cc-vigil/releases/download/v#{version}/cc-vigil-v#{version}-darwin.zip"
   name "cc-vigil"
