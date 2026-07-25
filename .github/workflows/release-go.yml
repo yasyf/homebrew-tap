@@ -1,5 +1,5 @@
 # The single reusable release workflow for every Go repo in the fleet. Its release
-# job owns verify-tag-on-main (or auto-tag), toolchain setup, Developer ID import,
+# job owns signed-tag verification, toolchain setup, Developer ID import,
 # artifact-only GoReleaser, exact draft staging, immutable delivery packaging, and
 # release-ID publication. A separate tap job consumes only that preserved delivery,
 # so retrying a tap failure can never rebuild or re-sign release bytes.
@@ -45,10 +45,6 @@ on:
         description: 'Zig version to install (e.g. "0.16.0"); empty to skip'
         type: string
         default: ""
-      auto-tag:
-        description: 'release on push to main with a monotonic v0.1.<run_number> tag (skips verify-tag-on-main)'
-        type: boolean
-        default: false
       pre-build:
         description: 'repo-specific runner setup run before goreleaser (install toolchains, echo env to $GITHUB_ENV)'
         type: string
@@ -91,72 +87,17 @@ jobs:
           fetch-depth: 0
 
       - name: Verify the tag is on main
-        if: ${{ !inputs.auto-tag }}
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@6ff6d7538aa743581185054c46627a9a644ba695
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@a4179241558456339fa2e41b97693a6cebae2e36
         with:
           plugin-manifest: ${{ inputs.plugin-manifest }}
-
-      - name: Auto-tag (push-to-main release)
-        id: auto-tag
-        if: ${{ inputs.auto-tag }}
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          test -n "$DEFAULT_BRANCH" || { echo "::error::repository default branch is unknown"; exit 1; }
-          # Reruns of a failed release keep the same run_number, so this must be
-          # idempotent: a tag already at THIS commit is reused (a release that died
-          # after the tag — e.g. goreleaser on a missing secret — stays rerunnable),
-          # a tag at a DIFFERENT commit is a real conflict that fails loud. We check
-          # both the fetched clone and origin, and never retag or force.
-          TAG="v0.1.${{ github.run_number }}"
-          SHA="$(git rev-parse HEAD)"
-          git fetch --no-tags origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
-          default_ref="refs/remotes/origin/${DEFAULT_BRANCH}"
-          git merge-base --is-ancestor "$SHA" "$default_ref" || {
-            echo "::error::auto-tag release commit $SHA is not an ancestor of $DEFAULT_BRANCH"
-            exit 1
-          }
-          existing=""
-          if local_sha="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}")"; then
-            existing="$local_sha"
-          fi
-          # A ^{} refspec peels an annotated tag to its commit; a lightweight one
-          # (what this step creates) yields the plain line, whose sha is the commit.
-          remote_ls="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" || true)"
-          if [ -n "$remote_ls" ]; then
-            remote_sha="$(printf '%s\n' "$remote_ls" | awk '/\^\{\}$/ {print $1}' | tail -n1)"
-            [ -n "$remote_sha" ] || remote_sha="$(printf '%s\n' "$remote_ls" | awk 'NR==1 {print $1}')"
-            if [ -n "$existing" ] && [ "$existing" != "$remote_sha" ]; then
-              echo "::error::tag $TAG is $existing locally but $remote_sha on origin"; exit 1
-            fi
-            existing="$remote_sha"
-          fi
-          if [ -n "$existing" ]; then
-            if [ "$existing" != "$SHA" ]; then
-              echo "::error::tag $TAG already exists at $existing but this run targets $SHA; refusing to retag (delete the stale tag or re-run from a fresh push)"; exit 1
-            fi
-            echo "tag $TAG already exists at $SHA; reusing it (idempotent re-run)"
-          else
-            git tag "$TAG" "$SHA"
-            git push origin "$TAG"
-          fi
-          echo "GORELEASER_CURRENT_TAG=$TAG" >> "$GITHUB_ENV"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Resolve the exact release tag
         id: tag
         env:
-          AUTO_TAG: ${{ steps.auto-tag.outputs.tag }}
-          GENERATED: ${{ inputs.auto-tag }}
           PUSH_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [ "$GENERATED" = true ]; then
-            tag="$AUTO_TAG"
-          else
-            tag="$PUSH_TAG"
-          fi
+          tag="$PUSH_TAG"
           semver='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
           [[ "$tag" =~ $semver ]] || { echo "::error::invalid release tag '$tag'"; exit 1; }
           core="${tag%%+*}"

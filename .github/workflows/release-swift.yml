@@ -1,6 +1,6 @@
 # The single reusable release workflow for every Swift CLI in the fleet. goreleaser
-# has no Swift builder, so this workflow owns the whole job by hand: verify-tag-on-main
-# (or auto-tag), Xcode selection, Developer ID import, a universal `swift build`,
+# has no Swift builder, so this workflow owns the whole job by hand: signed-tag
+# verification, Xcode selection, Developer ID import, a universal `swift build`,
 # native codesign + notarytool, and caller-owned GitHub release publication. The
 # release job preserves the exact public bytes and rendered cask in one immutable
 # Actions artifact; a separate retryable tap job verifies that bundle and publishes
@@ -45,10 +45,6 @@ on:
         description: directory containing Package.swift
         type: string
         default: "."
-      auto-tag:
-        description: 'release on push to main with a monotonic v0.1.<run_number> tag (skips verify-tag-on-main)'
-        type: boolean
-        default: false
       pre-build:
         description: 'repo-specific runner setup run before the build (install toolchains, echo env to $GITHUB_ENV)'
         type: string
@@ -95,27 +91,16 @@ jobs:
           fetch-depth: 0
 
       - name: Verify the tag is on main
-        if: ${{ !inputs.auto-tag }}
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@6ff6d7538aa743581185054c46627a9a644ba695
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@a4179241558456339fa2e41b97693a6cebae2e36
 
       - name: Resolve the release tag
         id: tag
-        env:
-          AUTO_TAG: ${{ inputs.auto-tag }}
         run: |
           set -euo pipefail
-          if [ "$AUTO_TAG" = "true" ]; then
-            TAG="v0.1.${{ github.run_number }}"
-            git tag "$TAG"
-            git push origin "$TAG"
-          else
-            # goreleaser asserted this implicitly for Go; a hand-rolled release must
-            # be explicit or a branch-triggered misconfiguration ships a garbage tag.
-            case "$GITHUB_REF" in
-              refs/tags/v*) TAG="$GITHUB_REF_NAME" ;;
-              *) echo "::error::release-swift.yml must run on a v* tag push (got $GITHUB_REF) — or set auto-tag: true"; exit 1 ;;
-            esac
-          fi
+          case "$GITHUB_REF" in
+            refs/tags/v*) TAG="$GITHUB_REF_NAME" ;;
+            *) echo "::error::release-swift.yml must run on a signed v* tag push (got $GITHUB_REF)"; exit 1 ;;
+          esac
           semver='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
           [[ "$TAG" =~ $semver ]] || { echo "::error::invalid release tag '$TAG'"; exit 1; }
           core="${TAG%%+*}"

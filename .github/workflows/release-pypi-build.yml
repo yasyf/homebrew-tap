@@ -15,10 +15,8 @@
 #   • maturin: maturin:true builds native wheels across `maturin-matrix` + an sdist
 #     (cc-transcript — PyO3). The wheel ABI comes from the crate's pyo3 features, not this
 #     workflow: abi3-py313 → one cp313-abi3 wheel per platform; no abi3 feature → per-CPython.
-#     Requires version-strategy:tag, package-subdir:'.', and no pre-build — the build jobs
+#     Requires package-subdir:'.' and no pre-build — the build jobs
 #     fail fast otherwise.
-#   • continuous-deploy: version-strategy:auto-tag derives v<base>.<run_number> and skips
-#     the on-main gate; pair with package-subdir + a pre-build hook. (cc-sentiment)
 #
 # Callers MUST use `secrets: inherit` (forwards GITHUB_TOKEN + any SENTRY_DSN a pre-build bakes).
 
@@ -55,14 +53,6 @@ on:
         description: enable sccache in maturin-action ("true"/"false")
         type: string
         default: "true"
-      version-strategy:
-        description: '"tag" (version from the pushed v* tag) or "auto-tag" (v<base>.<run_number>, skips the on-main gate)'
-        type: string
-        default: tag
-      auto-tag-version-base:
-        description: major.minor prefix for version-strategy:auto-tag (patch = github.run_number)
-        type: string
-        default: "0.1"
       package-subdir:
         description: subdirectory holding the package (build runs there); "." for a repo-root package
         type: string
@@ -86,9 +76,6 @@ on:
 
 jobs:
   verify-tag-on-main:
-    # Gate: the tagged commit must be on main. Skipped in auto-tag (continuous-deploy)
-    # mode — the build jobs below tolerate the skip via `!failure()`.
-    if: ${{ inputs.version-strategy == 'tag' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -96,10 +83,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@6ff6d7538aa743581185054c46627a9a644ba695
+      - uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@a4179241558456339fa2e41b97693a6cebae2e36
 
   build:
-    # Pure uv_build path. Runs when the gate succeeded (tag mode) or was skipped (auto-tag).
+    # Pure uv_build path. Runs only after exact signed-tag verification.
     needs: [verify-tag-on-main]
     if: ${{ !cancelled() && !failure() && !inputs.maturin }}
     runs-on: ubuntu-latest
@@ -118,24 +105,15 @@ jobs:
 
       - name: Resolve version
         id: ver
-        env:
-          VERSION_STRATEGY: ${{ inputs.version-strategy }}
-          VERSION_BASE: ${{ inputs.auto-tag-version-base }}
-          RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          if [ "$VERSION_STRATEGY" = "auto-tag" ]; then
-            VERSION="${VERSION_BASE}.${RUN_NUMBER}"
-            TAG="v$VERSION"
-          else
-            VERSION="${GITHUB_REF_NAME#v}"
-            TAG="$GITHUB_REF_NAME"
-          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="$GITHUB_REF_NAME"
           { echo "version=$VERSION"; echo "tag=$TAG"; } >> "$GITHUB_OUTPUT"
           echo "Resolved version: $VERSION (tag $TAG)"
 
       - name: Tag must exceed the latest published version
-        if: ${{ inputs.check-version && inputs.version-strategy == 'tag' }}
+        if: ${{ inputs.check-version }}
         env:
           PKG: ${{ inputs.dist-name }}
         run: |
@@ -197,12 +175,10 @@ jobs:
 
       - name: Validate maturin inputs
         env:
-          VERSION_STRATEGY: ${{ inputs.version-strategy }}
           PACKAGE_SUBDIR: ${{ inputs.package-subdir }}
           PRE_BUILD: ${{ inputs.pre-build }}
         run: |
           set -euo pipefail
-          [ "$VERSION_STRATEGY" = "tag" ] || { echo "::error::maturin requires version-strategy: tag"; exit 1; }
           [ "$PACKAGE_SUBDIR" = "." ] || { echo "::error::maturin requires package-subdir: '.' (repo-root)"; exit 1; }
           [ -z "$PRE_BUILD" ] || { echo "::error::maturin does not support pre-build"; exit 1; }
 
@@ -232,7 +208,7 @@ jobs:
           if-no-files-found: error
 
   build_sdist:
-    # maturin sdist (one, on ubuntu). maturin is always tag mode, so the tag is github.ref_name.
+    # maturin sdist (one, on ubuntu).
     needs: [verify-tag-on-main]
     if: ${{ !cancelled() && !failure() && inputs.maturin }}
     name: Build sdist
@@ -246,12 +222,10 @@ jobs:
 
       - name: Validate maturin inputs
         env:
-          VERSION_STRATEGY: ${{ inputs.version-strategy }}
           PACKAGE_SUBDIR: ${{ inputs.package-subdir }}
           PRE_BUILD: ${{ inputs.pre-build }}
         run: |
           set -euo pipefail
-          [ "$VERSION_STRATEGY" = "tag" ] || { echo "::error::maturin requires version-strategy: tag"; exit 1; }
           [ "$PACKAGE_SUBDIR" = "." ] || { echo "::error::maturin requires package-subdir: '.' (repo-root)"; exit 1; }
           [ -z "$PRE_BUILD" ] || { echo "::error::maturin does not support pre-build"; exit 1; }
 
@@ -262,7 +236,7 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Tag must exceed the latest published version
-        if: ${{ inputs.check-version && inputs.version-strategy == 'tag' }}
+        if: ${{ inputs.check-version }}
         env:
           PKG: ${{ inputs.dist-name }}
         run: |

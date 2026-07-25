@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           action=.github/actions/verify-tag-on-main
-          verifier_pin=6ff6d7538aa743581185054c46627a9a644ba695
+          verifier_pin=a4179241558456339fa2e41b97693a6cebae2e36
           python3 -m py_compile "$action/verify.py" "$action/test_verify.py"
           python3 "$action/test_verify.py"
           for workflow in \
@@ -74,6 +74,11 @@ jobs:
             .github/workflows/release-swift.yml; do
             test "$(grep -Ec "verify-tag-on-main@${verifier_pin}$" "$workflow")" = 1
           done
+          if grep -RInE 'auto-tag|version-strategy|git tag' .github/workflows/release-*.yml; then
+            echo "::error::shared release workflows must not create or accept unsigned tags"
+            exit 1
+          fi
+
   signed-release-tag:
     runs-on: ubuntu-latest
     steps:
@@ -292,7 +297,6 @@ jobs:
             echo "::error::release-go must delegate checksum verification to the exact manifest action"
             exit 1
           fi
-          grep -Fq "auto-tag release commit \$SHA is not an ancestor of \$DEFAULT_BRANCH" "$go"
           version_ref="version: \$"
           version_ref+='{{ steps.tag.outputs.version }}'
           grep -Fq "$version_ref" "$go"
@@ -1006,8 +1010,7 @@ jobs:
 
       # --- Swift family (macOS leg only: swift/lipo/ditto are darwin tools) ---
       # Known coverage gap: sign-notarize-binary's release-attach step (softprops)
-      # and release-swift.yml's auto-tag branch can't run here (both need a real
-      # tag + release). They're exercised only by consumer releases — touch them
+      # needs a real tag + release. It is exercised only by consumer releases — touch it
       # with extra care and validate on a scratch repo before repinning Swift callers.
 
       - name: Scaffold a hello Swift package
@@ -1069,8 +1072,8 @@ jobs:
           [ ! -e dist/swift-hello-v9.9.9-darwin-universal.zip ] || { echo "::error::unsigned Swift archive was created"; exit 1; }
 
       # --- Bun family (BOTH OS legs — the linux build/assert is new coverage) ---
-      # Known coverage gap: release-bun.yml's setup/release jobs (idempotent auto-tag,
-      # formula-collision guard, 4-leg artifact aggregation, single-release creation,
+      # Known coverage gap: release-bun.yml's setup/release jobs (formula-collision
+      # guard, 4-leg artifact aggregation, single-release creation,
       # cask publish) can't run here — they need a real tag + release. They're exercised
       # only by consumer releases — validate with an rc tag on the first consumer before
       # repinning callers to an immutable workflow owner. build-bun-binary and the

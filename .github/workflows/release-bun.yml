@@ -1,6 +1,6 @@
 # The single reusable release workflow for every bun-compiled TUI/CLI in the fleet.
 # bun has no goreleaser builder, so — like release-swift.yml — this workflow owns the
-# whole job by hand: verify-tag-on-main (or an idempotent auto-tag), a native-runner
+# whole job by hand: signed-tag verification, a native-runner
 # build matrix producing single-file binaries, Developer ID codesign + notarytool on
 # the darwin legs, one GitHub release, and a rendered binary cask pushed to this tap.
 # Each repo's release.yml collapses to a `uses:` line; the logic lives here, pinned
@@ -42,10 +42,6 @@ on:
         description: binary / cask / asset base name (default = repo name)
         type: string
         default: ${{ github.event.repository.name }}
-      auto-tag:
-        description: 'release on push to main with a monotonic v0.1.<run_number> tag (skips verify-tag-on-main)'
-        type: boolean
-        default: false
       pre-build:
         description: 'repo-specific runner setup run on every matrix leg before the build (install toolchains, echo env to $GITHUB_ENV)'
         type: string
@@ -90,56 +86,16 @@ jobs:
           fetch-depth: 0
 
       - name: Verify the tag is on main
-        if: ${{ !inputs.auto-tag }}
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@6ff6d7538aa743581185054c46627a9a644ba695
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@a4179241558456339fa2e41b97693a6cebae2e36
 
       - name: Resolve the release tag
         id: tag
-        env:
-          AUTO_TAG: ${{ inputs.auto-tag }}
         run: |
           set -euo pipefail
-          if [ "$AUTO_TAG" = "true" ]; then
-            # Reruns of a failed release keep the same run_number, so this must be
-            # idempotent: a tag already at THIS commit is reused (a release that died
-            # after the tag — e.g. a missing secret — stays rerunnable), a tag at a
-            # DIFFERENT commit is a real conflict that fails loud. We check both the
-            # fetched clone and origin, and never retag or force. (The idempotent
-            # release-go block, minus the goreleaser env export.)
-            TAG="v0.1.${{ github.run_number }}"
-            SHA="$(git rev-parse HEAD)"
-            existing=""
-            if local_sha="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}")"; then
-              existing="$local_sha"
-            fi
-            # A ^{} refspec peels an annotated tag to its commit; a lightweight one
-            # (what this step creates) yields the plain line, whose sha is the commit.
-            remote_ls="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" || true)"
-            if [ -n "$remote_ls" ]; then
-              remote_sha="$(printf '%s\n' "$remote_ls" | awk '/\^\{\}$/ {print $1}' | tail -n1)"
-              [ -n "$remote_sha" ] || remote_sha="$(printf '%s\n' "$remote_ls" | awk 'NR==1 {print $1}')"
-              if [ -n "$existing" ] && [ "$existing" != "$remote_sha" ]; then
-                echo "::error::tag $TAG is $existing locally but $remote_sha on origin"; exit 1
-              fi
-              existing="$remote_sha"
-            fi
-            if [ -n "$existing" ]; then
-              if [ "$existing" != "$SHA" ]; then
-                echo "::error::tag $TAG already exists at $existing but this run targets $SHA; refusing to retag (delete the stale tag or re-run from a fresh push)"; exit 1
-              fi
-              echo "tag $TAG already exists at $SHA; reusing it (idempotent re-run)"
-            else
-              git tag "$TAG" "$SHA"
-              git push origin "$TAG"
-            fi
-          else
-            # A hand-rolled release must assert the trigger explicitly or a
-            # branch-triggered misconfiguration ships a garbage tag.
-            case "$GITHUB_REF" in
-              refs/tags/v*) TAG="$GITHUB_REF_NAME" ;;
-              *) echo "::error::release-bun.yml must run on a v* tag push (got $GITHUB_REF) — or set auto-tag: true"; exit 1 ;;
-            esac
-          fi
+          case "$GITHUB_REF" in
+            refs/tags/v*) TAG="$GITHUB_REF_NAME" ;;
+            *) echo "::error::release-bun.yml must run on a signed v* tag push (got $GITHUB_REF)"; exit 1 ;;
+          esac
           {
             echo "tag=$TAG"
             echo "version=${TAG#v}"
