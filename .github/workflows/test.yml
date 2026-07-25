@@ -63,8 +63,17 @@ jobs:
         run: |
           set -euo pipefail
           action=.github/actions/verify-tag-on-main
+          verifier_pin=6ff6d7538aa743581185054c46627a9a644ba695
           python3 -m py_compile "$action/verify.py" "$action/test_verify.py"
           python3 "$action/test_verify.py"
+          for workflow in \
+            .github/workflows/release-app.yml \
+            .github/workflows/release-bun.yml \
+            .github/workflows/release-go.yml \
+            .github/workflows/release-pypi-build.yml \
+            .github/workflows/release-swift.yml; do
+            test "$(grep -Ec "verify-tag-on-main@${verifier_pin}$" "$workflow")" = 1
+          done
 
   public-go-tap-contract:
     runs-on: ubuntu-latest
