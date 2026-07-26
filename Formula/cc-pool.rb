@@ -11,8 +11,8 @@
 class CcPool < Formula
   desc "Predictive multi-account load-balancing for Claude Code"
   homepage "https://github.com/yasyf/cc-pool"
-  url "https://github.com/yasyf/cc-pool/releases/download/v0.64.4/cc-pool-v0.64.4-darwin-universal.tar.gz"
-  sha256 "5519679e91edd9612039cee8675b6e7e12d5eab0cdbe6191e11c741c7921762d" # pure
+  url "https://github.com/yasyf/cc-pool/releases/download/v0.64.8/cc-pool-v0.64.8-darwin-universal.tar.gz"
+  sha256 "b6768ef36c870d85b2f50ad358c39a163dd1af2a6f4c358b66fcb588a7303327" # pure
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -24,8 +24,8 @@ class CcPool < Formula
   preserve_rpath
 
   resource "status_app" do
-    url "https://github.com/yasyf/cc-pool/releases/download/v0.64.4/cc-pool-status-v0.64.4-darwin.zip", using: :nounzip
-    sha256 "c42df816dd2c78cda635a6161af926475b9a8c7490074714c997d9510c38e05b"
+    url "https://github.com/yasyf/cc-pool/releases/download/v0.64.8/cc-pool-status-v0.64.8-darwin.zip", using: :nounzip
+    sha256 "3a8ea2ecb06ea966899924c143a9f73aa9240118af942a327ec86673c349eae0"
   end
 
   def install
