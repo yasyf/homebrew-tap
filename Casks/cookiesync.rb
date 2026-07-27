@@ -18,8 +18,8 @@
 # every tagged release — do not hand-edit; change the template at cookiesync's
 # .github/cask/cookiesync.rb.tmpl instead.
 cask "cookiesync" do
-  version "0.27.3"
-  sha256 "0d371252364b72db8128e8dddc5d079d952944d1258ebb1dc911826ec9b37796" # app
+  version "0.27.4"
+  sha256 "2b33a57f8b6d08cb2284fe04fe84cdb55581df9ae762c547488bb43c0e00c761" # app
 
   url "https://github.com/yasyf/cookiesync/releases/download/v#{version}/CookieSync-v#{version}-darwin.zip"
   name "cookiesync"
