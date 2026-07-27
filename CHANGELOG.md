@@ -17,6 +17,24 @@ provenance; floating family tags are never runtime dependencies.
 
 ## Unreleased (`v1` family)
 
+- `verify-tag-on-main` accepts a lightweight tag. The gate demanded a GPG
+  signature from a pinned release key plus an annotated tag object, so cutting a
+  release meant carrying that key on whatever machine did the tagging; a plain
+  `git tag vX.Y.Z origin/main` now passes. Nothing else loosened — the ref name
+  is still semver, `GITHUB_SHA` still one exact 40-hex commit, that commit still
+  an ancestor of a freshly fetched `origin/main`, `refs/tags/<TAG>` still
+  advertised exactly once and resolving to it, still unmoved between the remote
+  advertisement and the fetch, and still in agreement with the `plugin-manifest`
+  version when one is set. `verify.py` and `verify.sh` reach that verdict
+  independently, over the API and over local git, and both stop at one level of
+  tag indirection, so a nested tag object is refused either way.
+  `release-signing-key.asc` is deleted.
+- All five reusable workflows — `release-app.yml`, `release-bun.yml`,
+  `release-go.yml`, `release-pypi-build.yml`, `release-swift.yml` — pin the gate
+  commit that ships this, so the repin crosses `pypi-v1`, `swift-v1`, and
+  `bun-v1` too. The README's caller snippets and documented owner SHAs follow.
+  `test.yml` asserts the pin appears exactly once per workflow, so a partial
+  bump fails CI.
 - New `wrap-daemon-bundle` composite action. It wraps a bare universal Mach-O
   daemon in a minimal signed + notarized + stapled `.app` so the service's macOS
   TCC grant is keyed by `CFBundleIdentifier` (`client_type=0`) and survives

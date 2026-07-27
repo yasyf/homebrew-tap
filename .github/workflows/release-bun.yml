@@ -13,7 +13,7 @@
 #
 # Callers MUST use `secrets: inherit` (forwards HOMEBREW_TAP_TOKEN + the five MACOS_*).
 # Minimal caller:
-#   jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-bun.yml@a9ecff42ac7721452905327071316bca2b49bb68, secrets: inherit } }
+#   jobs: { release: { uses: yasyf/homebrew-tap/.github/workflows/release-bun.yml@41f8de6765b3b833ef333b0b98f5683f0e46685b, secrets: inherit } }
 #
 # Why a 4-leg native-runner matrix (no cross-compile): bun refuses to extract
 # platform-mismatched optional deps, and `bun build --compile --target=…` inlines

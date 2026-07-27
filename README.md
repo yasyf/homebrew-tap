@@ -24,7 +24,7 @@ on: { push: { tags: ["v*"] } }
 permissions: { contents: write }
 jobs:
   release:
-    uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@4afbb78f9e1814af04f9686ccf101ecafd5aa295
+    uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@41f8de6765b3b833ef333b0b98f5683f0e46685b
     secrets: inherit
     with: { setup-bun: true }   # optional, for a go:embed prebuild hook
 ```
@@ -41,7 +41,7 @@ on: { push: { tags: ["v*"] } }
 permissions: { contents: write }
 jobs:
   release:
-    uses: yasyf/homebrew-tap/.github/workflows/release-swift.yml@83ee384b1d4fe25a8e4aa7258bb76d55e1593735
+    uses: yasyf/homebrew-tap/.github/workflows/release-swift.yml@41f8de6765b3b833ef333b0b98f5683f0e46685b
     secrets: inherit
 ```
 
@@ -59,7 +59,7 @@ on: { push: { tags: ["v*"] } }
 permissions: { contents: write }
 jobs:
   release:
-    uses: yasyf/homebrew-tap/.github/workflows/release-bun.yml@a9ecff42ac7721452905327071316bca2b49bb68
+    uses: yasyf/homebrew-tap/.github/workflows/release-bun.yml@41f8de6765b3b833ef333b0b98f5683f0e46685b
     secrets: inherit
 ```
 
@@ -74,7 +74,7 @@ Xcode `.app`) and compose their own workflow:
 
 | Action | Purpose |
 |---|---|
-| `actions/verify-tag-on-main@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | refuse a tag not reachable from `origin/main` (needs a prior `checkout` with `fetch-depth: 0`) |
+| `actions/verify-tag-on-main@2281a3ea884422db190de44fad65ce9bc08b19c4` | refuse a tag not reachable from `origin/main` (needs a prior `checkout` with `fetch-depth: 0`) |
 | `actions/import-developer-id@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | import the Developer ID cert into a throwaway keychain; export the signing env + `$MACOS_CODESIGN_SCRIPT` (the canonical `macos-codesign.sh`) — the single home of the keychain dance |
 | `actions/render-formula@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | fill a repo `.rb` template (`__VERSION__` / `__SHA_*__` / custom tokens) into a staging dir |
 | `actions/sign-notarize-app@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | sign + notarize + staple a built `.app`, zip it, attach to the release, output the zip's sha256 (pair with `render-formula` for its cask) |
@@ -105,15 +105,15 @@ The canonical recipe + credential setup lives in `repo-bootstrap`'s
 Four independent tag families version the shared infrastructure:
 
 - **`v1`** — Go provenance label for the composite actions and `release-go.yml`;
-  the documented workflow owner is `4afbb78f9e1814af04f9686ccf101ecafd5aa295`.
+  the documented workflow owner is `41f8de6765b3b833ef333b0b98f5683f0e46685b`.
 - **`pypi-v1`** — Python provenance label for `release-pypi-build.yml`; the
-  documented workflow owner is `8f422c652d836c40f9cc5a9d893d4120b26bc681`.
+  documented workflow owner is `41f8de6765b3b833ef333b0b98f5683f0e46685b`.
 - **`swift-v1`** — Swift provenance label for `release-swift.yml`,
   `build-swift-universal`, and `sign-notarize-binary`; the documented workflow
-  owner is `83ee384b1d4fe25a8e4aa7258bb76d55e1593735`.
+  owner is `41f8de6765b3b833ef333b0b98f5683f0e46685b`.
 - **`bun-v1`** — Bun provenance label for `release-bun.yml` and
   `build-bun-binary`; the documented workflow owner is
-  `a9ecff42ac7721452905327071316bca2b49bb68`.
+  `41f8de6765b3b833ef333b0b98f5683f0e46685b`.
 
 Consumers pin immutable 40-character commit SHAs. The tag families remain useful release
 labels, but they are never runtime dependencies and are never force-moved to update callers.
