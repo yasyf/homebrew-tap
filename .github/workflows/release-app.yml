@@ -130,7 +130,7 @@ jobs:
           validate-only: "true"
 
       - name: Verify the tag is on main
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@a4179241558456339fa2e41b97693a6cebae2e36
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@af51a0572c08c91a21ce29bc82fde3043946da8a
 
       - name: Validate release inputs and apply the change gate
         id: gate

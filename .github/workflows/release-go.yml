@@ -1,5 +1,5 @@
 # The single reusable release workflow for every Go repo in the fleet. Its release
-# job owns signed-tag verification, toolchain setup, Developer ID import,
+# job owns release-tag verification, toolchain setup, Developer ID import,
 # artifact-only GoReleaser, exact draft staging, immutable delivery packaging, and
 # release-ID publication. A separate tap job consumes only that preserved delivery,
 # so retrying a tap failure can never rebuild or re-sign release bytes.
@@ -87,7 +87,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify the tag is on main
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@a4179241558456339fa2e41b97693a6cebae2e36
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@af51a0572c08c91a21ce29bc82fde3043946da8a
         with:
           plugin-manifest: ${{ inputs.plugin-manifest }}
 

@@ -1,5 +1,5 @@
 # The single reusable release workflow for every Swift CLI in the fleet. goreleaser
-# has no Swift builder, so this workflow owns the whole job by hand: signed-tag
+# has no Swift builder, so this workflow owns the whole job by hand: release-tag
 # verification, Xcode selection, Developer ID import, a universal `swift build`,
 # native codesign + notarytool, and caller-owned GitHub release publication. The
 # release job preserves the exact public bytes and rendered cask in one immutable
@@ -91,7 +91,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify the tag is on main
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@a4179241558456339fa2e41b97693a6cebae2e36
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@af51a0572c08c91a21ce29bc82fde3043946da8a
 
       - name: Resolve the release tag
         id: tag
@@ -99,7 +99,7 @@ jobs:
           set -euo pipefail
           case "$GITHUB_REF" in
             refs/tags/v*) TAG="$GITHUB_REF_NAME" ;;
-            *) echo "::error::release-swift.yml must run on a signed v* tag push (got $GITHUB_REF)"; exit 1 ;;
+            *) echo "::error::release-swift.yml must run on a v* tag push (got $GITHUB_REF)"; exit 1 ;;
           esac
           semver='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
           [[ "$TAG" =~ $semver ]] || { echo "::error::invalid release tag '$TAG'"; exit 1; }

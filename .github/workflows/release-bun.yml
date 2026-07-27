@@ -1,6 +1,6 @@
 # The single reusable release workflow for every bun-compiled TUI/CLI in the fleet.
 # bun has no goreleaser builder, so — like release-swift.yml — this workflow owns the
-# whole job by hand: signed-tag verification, a native-runner
+# whole job by hand: release-tag verification, a native-runner
 # build matrix producing single-file binaries, Developer ID codesign + notarytool on
 # the darwin legs, one GitHub release, and a rendered binary cask pushed to this tap.
 # Each repo's release.yml collapses to a `uses:` line; the logic lives here, pinned
@@ -86,7 +86,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify the tag is on main
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@a4179241558456339fa2e41b97693a6cebae2e36
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@af51a0572c08c91a21ce29bc82fde3043946da8a
 
       - name: Resolve the release tag
         id: tag
@@ -94,7 +94,7 @@ jobs:
           set -euo pipefail
           case "$GITHUB_REF" in
             refs/tags/v*) TAG="$GITHUB_REF_NAME" ;;
-            *) echo "::error::release-bun.yml must run on a signed v* tag push (got $GITHUB_REF)"; exit 1 ;;
+            *) echo "::error::release-bun.yml must run on a v* tag push (got $GITHUB_REF)"; exit 1 ;;
           esac
           {
             echo "tag=$TAG"
