@@ -47,6 +47,24 @@ expect_failure() {
   }
 }
 
+<<<<<<< HEAD
+||||||| parent of ec7ff47 (feat(release): accept lightweight release tags)
+create_signed_tag v1.2.3 "$signing_home" "$signing_fingerprint" "$main_sha"
+=======
+# shellcheck disable=SC2030,SC2031  # intentional: the shim env is scoped to this subshell
+expect_shim_failure() {
+  local shim="$1"
+  local tag="$2"
+  local object="$3"
+  local sha="$4"
+  local expected="$5"
+  (
+    export PATH="$work/bin/$shim:$PATH" SHIM_TAG="$tag" SHIM_OBJECT="$object"
+    expect_failure "$tag" "$sha" "$expected"
+  )
+}
+
+>>>>>>> ec7ff47 (feat(release): accept lightweight release tags)
 git tag v1.2.3 "$main_sha"
 git tag -a -m v1.2.4 v1.2.4 "$main_sha"
 git push -q origin refs/tags/v1.2.3 refs/tags/v1.2.4
@@ -124,6 +142,7 @@ git tag v1.3.3 "$main_sha"
 git push -q origin refs/tags/v1.2.7 refs/tags/v1.3.0 refs/tags/v1.3.1 refs/tags/v1.3.2 refs/tags/v1.3.3
 swapped_tag_object="$(git rev-parse refs/tags/v1.3.2)"
 
+<<<<<<< HEAD
 (
   export PATH="$work/bin/mover:$PATH" SHIM_TAG=v1.2.7 SHIM_OBJECT="$second_sha"
   expect_failure v1.2.7 "$main_sha" "v1.2.7 moved while its release gate was running"
@@ -140,5 +159,13 @@ swapped_tag_object="$(git rev-parse refs/tags/v1.3.2)"
   export PATH="$work/bin/liar:$PATH" SHIM_TAG=v1.3.3 SHIM_OBJECT="$second_sha"
   expect_failure v1.3.3 "$second_sha" "the fetched v1.3.3 resolves to $main_sha"
 )
+||||||| parent of ec7ff47 (feat(release): accept lightweight release tags)
+echo "ok: signed annotated release-tag gate"
+=======
+expect_shim_failure mover v1.2.7 "$second_sha" "$main_sha" "v1.2.7 moved while its release gate was running"
+expect_shim_failure mover v1.3.1 "$swapped_tag_object" "$main_sha" "v1.3.1 moved while its release gate was running"
+expect_shim_failure liar v1.3.0 "$second_sha" "$second_sha" "the fetched v1.3.0 resolves to $main_sha"
+expect_shim_failure liar v1.3.3 "$second_sha" "$second_sha" "the fetched v1.3.3 resolves to $main_sha"
+>>>>>>> ec7ff47 (feat(release): accept lightweight release tags)
 
 echo "ok: release-tag gate"

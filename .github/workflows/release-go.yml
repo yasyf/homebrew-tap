@@ -87,7 +87,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify the tag is on main
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@af51a0572c08c91a21ce29bc82fde3043946da8a
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@cc414b052cfdee5da63b1e8cf2b8486521de3d2e
         with:
           plugin-manifest: ${{ inputs.plugin-manifest }}
 
