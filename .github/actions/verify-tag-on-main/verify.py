@@ -22,33 +22,46 @@ def _mapping(value: Any, field: str) -> dict[str, Any]:
     return value
 
 
+def _ref_object(ref_payload: dict[str, Any]) -> dict[str, Any]:
+    ref_object = _mapping(ref_payload.get("object"), "remote ref object")
+    sha = ref_object.get("sha")
+    if not isinstance(sha, str) or not sha:
+        raise VerificationError("remote ref object has no SHA")
+    return ref_object
+
+
 def validate(
     ref_payload: dict[str, Any],
-    tag_payload: dict[str, Any],
+    tag_payload: dict[str, Any] | None,
     expected_tag: str,
     expected_sha: str,
 ) -> None:
-    """Validate an annotated, verified tag over the exact expected commit."""
+    """Validate a lightweight or annotated tag over the exact expected commit."""
     expected_ref = f"refs/tags/{expected_tag}"
     if ref_payload.get("ref") != expected_ref:
         raise VerificationError(
             f"remote ref is {ref_payload.get('ref')!r}, expected {expected_ref!r}"
         )
 
-    ref_object = _mapping(ref_payload.get("object"), "remote ref object")
+    ref_object = _ref_object(ref_payload)
+    ref_object_sha = ref_object["sha"]
+    if ref_object.get("type") == "commit":
+        if ref_object_sha != expected_sha:
+            raise VerificationError(
+                f"remote ref names {ref_object_sha!r}, but this run is for {expected_sha!r}"
+            )
+        return
     if ref_object.get("type") != "tag":
         raise VerificationError(
-            "remote ref is not an annotated tag object "
-            f"(type={ref_object.get('type')!r}); lightweight tags are forbidden"
+            "remote ref object is neither a commit nor a tag "
+            f"(type={ref_object.get('type')!r})"
         )
-    tag_object_sha = ref_object.get("sha")
-    if not isinstance(tag_object_sha, str) or not tag_object_sha:
-        raise VerificationError("remote ref tag object has no SHA")
 
-    if tag_payload.get("sha") != tag_object_sha:
+    tag_payload = _mapping(tag_payload, "tag object")
+    if tag_payload.get("sha") != ref_object_sha:
         raise VerificationError(
             "fetched tag object SHA does not match the remote ref "
-            f"({tag_payload.get('sha')!r} != {tag_object_sha!r})"
+            f"({tag_payload.get('sha')!r} != {ref_object_sha!r})"
         )
     if tag_payload.get("tag") != expected_tag:
         raise VerificationError(
@@ -63,18 +76,6 @@ def validate(
     if target.get("sha") != expected_sha:
         raise VerificationError(
             f"tag targets {target.get('sha')!r}, but this run is for {expected_sha!r}"
-        )
-
-    verification = _mapping(tag_payload.get("verification"), "tag verification")
-    if verification.get("verified") is not True:
-        raise VerificationError(
-            "GitHub did not verify the tag signature "
-            f"(reason={verification.get('reason')!r})"
-        )
-    if verification.get("reason") != "valid":
-        raise VerificationError(
-            "GitHub tag verification reason is not 'valid' "
-            f"(reason={verification.get('reason')!r})"
         )
 
 
@@ -120,17 +121,14 @@ def main() -> int:
     ref_payload = fetch_json(
         f"{api_url}/repos/{repository}/git/ref/tags/{encoded_tag}", token
     )
-    ref_object = _mapping(ref_payload.get("object"), "remote ref object")
-    if ref_object.get("type") != "tag":
-        validate(ref_payload, {}, tag, sha)
-    tag_object_sha = ref_object.get("sha")
-    if not isinstance(tag_object_sha, str) or not tag_object_sha:
-        raise VerificationError("remote ref tag object has no SHA")
-    tag_payload = fetch_json(
-        f"{api_url}/repos/{repository}/git/tags/{tag_object_sha}", token
-    )
+    ref_object = _ref_object(ref_payload)
+    tag_payload: dict[str, Any] | None = None
+    if ref_object.get("type") == "tag":
+        tag_payload = fetch_json(
+            f"{api_url}/repos/{repository}/git/tags/{ref_object['sha']}", token
+        )
     validate(ref_payload, tag_payload, tag, sha)
-    print(f"✓ {tag} is an annotated, GitHub-verified signed tag over {sha}.")
+    print(f"✓ {tag} resolves to exactly {sha}.")
     return 0
 
 

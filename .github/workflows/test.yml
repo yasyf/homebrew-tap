@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Exercise strict signed-tag verification
+      - name: Exercise strict release-tag verification
         run: |
           set -euo pipefail
           action=.github/actions/verify-tag-on-main
@@ -75,15 +75,15 @@ jobs:
             test "$(grep -Ec "verify-tag-on-main@${verifier_pin}$" "$workflow")" = 1
           done
           if grep -RInE 'auto-tag|version-strategy|git tag' .github/workflows/release-*.yml; then
-            echo "::error::shared release workflows must not create or accept unsigned tags"
+            echo "::error::shared release workflows must not create their own tags"
             exit 1
           fi
 
-  signed-release-tag:
+  release-tag-gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Reject every inexact or untrusted tag shape
+      - name: Reject every inexact tag shape
         run: .github/actions/verify-tag-on-main/test.sh
 
   public-go-tap-contract:

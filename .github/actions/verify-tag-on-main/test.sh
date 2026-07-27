@@ -7,31 +7,6 @@ verifier="$root/verify.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-production_fingerprint="$(
-  gpg --batch --show-keys --with-colons --fingerprint "$root/release-signing-key.asc" |
-    awk -F: '$1 == "fpr" { print $10; exit }'
-)"
-[[ "$production_fingerprint" == F3299DE3FE0F6C3CF2B66BFBF7ECDD88A700D73A ]]
-
-generate_key() {
-  local home="$1"
-  local identity="$2"
-  mkdir -p "$home"
-  chmod 700 "$home"
-  gpg --batch --homedir "$home" --pinentry-mode loopback --passphrase "" \
-    --quick-generate-key "$identity" rsa2048 sign 0 >/dev/null 2>&1
-  gpg --batch --homedir "$home" --with-colons --fingerprint |
-    awk -F: '$1 == "fpr" { print $10; exit }'
-}
-
-signing_home="$work/signing"
-wrong_home="$work/wrong"
-signing_fingerprint="$(generate_key "$signing_home" "Fleet Test <fleet@example.invalid>")"
-wrong_fingerprint="$(generate_key "$wrong_home" "Wrong Test <wrong@example.invalid>")"
-trusted_key="$work/trusted.asc"
-gpg --batch --homedir "$signing_home" --armor --export "$signing_fingerprint" >"$trusted_key"
-gpg --batch --homedir "$wrong_home" --armor --export "$wrong_fingerprint" >>"$trusted_key"
-
 git init -q --bare "$work/origin.git"
 git clone -q "$work/origin.git" "$work/repo"
 cd "$work/repo"
@@ -44,16 +19,6 @@ git branch -M main
 git push -q -u origin main
 main_sha="$(git rev-parse HEAD)"
 
-create_signed_tag() {
-  local tag="$1"
-  local home="$2"
-  local fingerprint="$3"
-  local target="$4"
-  GNUPGHOME="$home" git -c user.signingkey="$fingerprint" \
-    tag -s -m "$tag" "$tag" "$target"
-  git push -q origin "refs/tags/$tag"
-}
-
 verify() {
   local tag="$1"
   local sha="$2"
@@ -62,8 +27,6 @@ verify() {
     GITHUB_REF_NAME="$tag" \
     GITHUB_SHA="$sha" \
     PLUGIN_MANIFEST="$manifest" \
-    TRUSTED_RELEASE_KEY="$trusted_key" \
-    TRUSTED_RELEASE_FINGERPRINT="$signing_fingerprint" \
     "$verifier"
 }
 
@@ -71,8 +34,9 @@ expect_failure() {
   local tag="$1"
   local sha="$2"
   local expected="$3"
+  local manifest="${4:-}"
   local output
-  if output="$(verify "$tag" "$sha" 2>&1)"; then
+  if output="$(verify "$tag" "$sha" "$manifest" 2>&1)"; then
     echo "FAIL: $tag unexpectedly passed" >&2
     exit 1
   fi
@@ -83,34 +47,98 @@ expect_failure() {
   }
 }
 
-create_signed_tag v1.2.3 "$signing_home" "$signing_fingerprint" "$main_sha"
+git tag v1.2.3 "$main_sha"
+git tag -a -m v1.2.4 v1.2.4 "$main_sha"
+git push -q origin refs/tags/v1.2.3 refs/tags/v1.2.4
+
 printf '{"version":"1.2.3"}\n' >plugin.json
 verify v1.2.3 "$main_sha" plugin.json
+verify v1.2.4 "$main_sha"
 
-git tag v1.2.4 "$main_sha"
-git push -q origin refs/tags/v1.2.4
-expect_failure v1.2.4 "$main_sha" "must be one annotated tag object"
+printf '{"version":"9.9.9"}\n' >wrong-version.json
+expect_failure v1.2.3 "$main_sha" "does not match" wrong-version.json
+expect_failure v1.2.3 "$main_sha" "does not exist" "$work/absent.json"
+printf '{}\n' >no-version.json
+expect_failure v1.2.3 "$main_sha" "has no top-level string version" no-version.json
 
-git tag -a -m v1.2.5 v1.2.5 "$main_sha"
+expect_failure v1.2 "$main_sha" "must be a semantic release tag"
+expect_failure v1.2.3 not-a-commit-sha "must be one exact commit"
+
+git tag v1.2.5 "$main_sha"
 git push -q origin refs/tags/v1.2.5
-expect_failure v1.2.5 "$main_sha" "signature verification failed"
+git push -q origin "main:refs/heads/refs/tags/v1.2.5"
+expect_failure v1.2.5 "$main_sha" "must advertise exactly one refs/tags/v1.2.5 object"
 
-create_signed_tag v1.2.6 "$wrong_home" "$wrong_fingerprint" "$main_sha"
-expect_failure v1.2.6 "$main_sha" "is not signed by trusted key"
+git push -q origin "main:refs/heads/refs/tags/v1.2.8"
+expect_failure v1.2.8 "$main_sha" "origin returned an inexact tag ref"
+
+git -c advice.nestedTag=false tag -a -m v1.2.9 v1.2.9 "$(git rev-parse refs/tags/v1.2.4)"
+git push -q origin refs/tags/v1.2.9
+expect_failure v1.2.9 "$main_sha" "v1.2.9 is a tag object pointing at a tag, not a commit"
 
 git switch -qc side
 printf 'side\n' >>fixture.txt
 git commit -qam side
 side_sha="$(git rev-parse HEAD)"
-create_signed_tag v1.2.7 "$signing_home" "$signing_fingerprint" "$side_sha"
-expect_failure v1.2.7 "$side_sha" "which is not on main"
+git tag v1.2.6 "$side_sha"
+git push -q origin refs/tags/v1.2.6
+expect_failure v1.2.6 "$side_sha" "which is not on main"
 git switch -q main
 
 printf 'second\n' >>fixture.txt
 git commit -qam second
 second_sha="$(git rev-parse HEAD)"
 git push -q origin main
-create_signed_tag v1.2.8 "$signing_home" "$signing_fingerprint" "$main_sha"
-expect_failure v1.2.8 "$second_sha" "peels to $main_sha"
+expect_failure v1.2.3 "$second_sha" "origin advertises v1.2.3 at $main_sha"
+expect_failure v1.2.4 "$second_sha" "origin advertises v1.2.4 at $main_sha"
 
-echo "ok: signed annotated release-tag gate"
+real_git="$(command -v git)"
+mkdir -p "$work/bin/mover" "$work/bin/liar"
+cat >"$work/bin/mover/git" <<EOF
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [[ "\$arg" == "refs/tags/\$SHIM_TAG:refs/tags/\$SHIM_TAG" ]]; then
+    "$real_git" --git-dir="$work/origin.git" update-ref "refs/tags/\$SHIM_TAG" "\$SHIM_OBJECT"
+    break
+  fi
+done
+exec "$real_git" "\$@"
+EOF
+cat >"$work/bin/liar/git" <<EOF
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [[ "\$arg" == "refs/tags/\$SHIM_TAG^{}" ]]; then
+    printf '%s\trefs/tags/%s^{}\n' "\$SHIM_OBJECT" "\$SHIM_TAG"
+    exit 0
+  fi
+done
+exec "$real_git" "\$@"
+EOF
+chmod +x "$work/bin/mover/git" "$work/bin/liar/git"
+
+git tag v1.2.7 "$main_sha"
+git tag -a -m v1.3.0 v1.3.0 "$main_sha"
+git tag -a -m v1.3.1 v1.3.1 "$main_sha"
+git tag -a -m swapped v1.3.2 "$main_sha"
+git tag v1.3.3 "$main_sha"
+git push -q origin refs/tags/v1.2.7 refs/tags/v1.3.0 refs/tags/v1.3.1 refs/tags/v1.3.2 refs/tags/v1.3.3
+swapped_tag_object="$(git rev-parse refs/tags/v1.3.2)"
+
+(
+  export PATH="$work/bin/mover:$PATH" SHIM_TAG=v1.2.7 SHIM_OBJECT="$second_sha"
+  expect_failure v1.2.7 "$main_sha" "v1.2.7 moved while its release gate was running"
+)
+(
+  export PATH="$work/bin/mover:$PATH" SHIM_TAG=v1.3.1 SHIM_OBJECT="$swapped_tag_object"
+  expect_failure v1.3.1 "$main_sha" "v1.3.1 moved while its release gate was running"
+)
+(
+  export PATH="$work/bin/liar:$PATH" SHIM_TAG=v1.3.0 SHIM_OBJECT="$second_sha"
+  expect_failure v1.3.0 "$second_sha" "the fetched v1.3.0 resolves to $main_sha"
+)
+(
+  export PATH="$work/bin/liar:$PATH" SHIM_TAG=v1.3.3 SHIM_OBJECT="$second_sha"
+  expect_failure v1.3.3 "$second_sha" "the fetched v1.3.3 resolves to $main_sha"
+)
+
+echo "ok: release-tag gate"

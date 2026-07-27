@@ -1,8 +1,8 @@
 name: Verify tag on main
 description: >-
   Trust gate for a tag-triggered release, run before any build or publish.
-  Requires one annotated tag object signed by the fleet release key, directly naming
-  github.sha on main. GitHub API verification and local git/GPG verification must
+  Requires one semantic release tag resolving to exactly github.sha, itself an
+  ancestor of origin/main. GitHub API verification and local git verification must
   independently agree. Also rejects remote tag movement and, when plugin-manifest
   is set, a tag that does not match the manifest version. Requires a prior checkout
   with fetch-depth: 0.
@@ -18,14 +18,12 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Verify the exact signed annotated release tag
+    - name: Verify the exact release tag
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
         GITHUB_TOKEN: ${{ github.token }}
         PLUGIN_MANIFEST: ${{ inputs.plugin-manifest }}
-        TRUSTED_RELEASE_KEY: ${{ github.action_path }}/release-signing-key.asc
-        TRUSTED_RELEASE_FINGERPRINT: F3299DE3FE0F6C3CF2B66BFBF7ECDD88A700D73A
       run: |
         set -euo pipefail
         python3 "${ACTION_PATH}/verify.py"

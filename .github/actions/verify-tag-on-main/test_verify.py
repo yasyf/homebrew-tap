@@ -4,10 +4,15 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
+import os
 import pathlib
+import re
 import unittest
 from collections.abc import Callable
 from typing import Any
+from unittest import mock
 
 
 MODULE_PATH = pathlib.Path(__file__).with_name("verify.py")
@@ -19,9 +24,12 @@ SPEC.loader.exec_module(VERIFY)
 TAG = "v1.2.3"
 COMMIT_SHA = "1" * 40
 TAG_SHA = "2" * 40
+REPOSITORY = "yasyf/homebrew-tap"
+REF_URL = f"https://api.github.com/repos/{REPOSITORY}/git/ref/tags/{TAG}"
+TAG_URL = f"https://api.github.com/repos/{REPOSITORY}/git/tags/{TAG_SHA}"
 
 
-def valid_payloads() -> tuple[dict[str, object], dict[str, object]]:
+def annotated_payloads() -> tuple[dict[str, object], dict[str, object]]:
     return (
         {
             "ref": f"refs/tags/{TAG}",
@@ -31,9 +39,39 @@ def valid_payloads() -> tuple[dict[str, object], dict[str, object]]:
             "sha": TAG_SHA,
             "tag": TAG,
             "object": {"type": "commit", "sha": COMMIT_SHA},
-            "verification": {"verified": True, "reason": "valid"},
         },
     )
+
+
+def lightweight_ref() -> dict[str, object]:
+    return {
+        "ref": f"refs/tags/{TAG}",
+        "object": {"type": "commit", "sha": COMMIT_SHA},
+    }
+
+
+def run_main(
+    payloads: list[dict[str, object]], omit: str | None = None
+) -> tuple[int, list[str]]:
+    urls: list[str] = []
+
+    def fetch_json(url: str, token: str) -> dict[str, object]:
+        urls.append(url)
+        return payloads[len(urls) - 1]
+
+    environment = {
+        "GITHUB_REPOSITORY": REPOSITORY,
+        "GITHUB_REF_NAME": TAG,
+        "GITHUB_SHA": COMMIT_SHA,
+        "GITHUB_TOKEN": "token",
+    }
+    if omit is not None:
+        del environment[omit]
+    with (
+        mock.patch.object(VERIFY, "fetch_json", fetch_json),
+        mock.patch.dict(os.environ, environment, clear=True),
+    ):
+        return VERIFY.main(), urls
 
 
 class ValidateTest(unittest.TestCase):
@@ -42,36 +80,48 @@ class ValidateTest(unittest.TestCase):
         mutate: Callable[[dict[str, Any], dict[str, Any]], None],
         pattern: str,
     ) -> None:
-        ref_payload, tag_payload = valid_payloads()
+        ref_payload, tag_payload = annotated_payloads()
         mutate(ref_payload, tag_payload)
         with self.assertRaisesRegex(VERIFY.VerificationError, pattern):
             VERIFY.validate(ref_payload, tag_payload, TAG, COMMIT_SHA)
 
-    def test_accepts_exact_verified_annotated_tag(self) -> None:
-        ref_payload, tag_payload = valid_payloads()
+    def test_accepts_annotated_tag(self) -> None:
+        ref_payload, tag_payload = annotated_payloads()
         VERIFY.validate(ref_payload, tag_payload, TAG, COMMIT_SHA)
 
-    def test_rejects_lightweight_tag(self) -> None:
+    def test_accepts_lightweight_tag(self) -> None:
+        VERIFY.validate(lightweight_ref(), None, TAG, COMMIT_SHA)
+
+    def test_rejects_lightweight_tag_over_wrong_commit(self) -> None:
+        ref_payload = lightweight_ref()
+        ref_payload["object"] = {"type": "commit", "sha": "3" * 40}
+        with self.assertRaisesRegex(VERIFY.VerificationError, "remote ref names"):
+            VERIFY.validate(ref_payload, None, TAG, COMMIT_SHA)
+
+    def test_rejects_wrong_remote_ref_for_lightweight(self) -> None:
+        ref_payload = lightweight_ref()
+        ref_payload["ref"] = "refs/tags/v9.9.9"
+        with self.assertRaisesRegex(VERIFY.VerificationError, "remote ref is"):
+            VERIFY.validate(ref_payload, None, TAG, COMMIT_SHA)
+
+    def test_rejects_unknown_ref_object_type(self) -> None:
         self.assert_rejected(
-            lambda ref, _tag: ref["object"].update(type="commit"),
-            "lightweight tags are forbidden",
+            lambda ref, _tag: ref["object"].update(type="tree"),
+            "neither a commit nor a tag",
         )
 
-    def test_rejects_unsigned_tag(self) -> None:
-        self.assert_rejected(
-            lambda _ref, tag: tag["verification"].update(
-                verified=False, reason="unsigned"
-            ),
-            "did not verify.*unsigned",
-        )
+    def test_rejects_ref_object_without_sha(self) -> None:
+        ref_payload = lightweight_ref()
+        ref_payload["object"] = {"type": "commit"}
+        with self.assertRaisesRegex(VERIFY.VerificationError, "no SHA"):
+            VERIFY.validate(ref_payload, None, TAG, COMMIT_SHA)
 
-    def test_rejects_bad_signature(self) -> None:
-        self.assert_rejected(
-            lambda _ref, tag: tag["verification"].update(
-                verified=False, reason="invalid"
-            ),
-            "did not verify.*invalid",
-        )
+    def test_rejects_annotated_ref_without_tag_payload(self) -> None:
+        ref_payload, _tag_payload = annotated_payloads()
+        with self.assertRaisesRegex(
+            VERIFY.VerificationError, "tag object must be an object"
+        ):
+            VERIFY.validate(ref_payload, None, TAG, COMMIT_SHA)
 
     def test_rejects_non_commit_target(self) -> None:
         self.assert_rejected(
@@ -102,6 +152,73 @@ class ValidateTest(unittest.TestCase):
             lambda ref, _tag: ref.update(ref="refs/tags/v9.9.9"),
             "remote ref is",
         )
+
+    def test_rejects_non_object_ref_payload_object(self) -> None:
+        self.assert_rejected(
+            lambda ref, _tag: ref.update(object=[{"type": "commit"}]),
+            "remote ref object must be an object",
+        )
+
+    def test_rejects_non_object_tag_target(self) -> None:
+        self.assert_rejected(
+            lambda _ref, tag: tag.update(object=[{"type": "commit"}]),
+            "tag target must be an object",
+        )
+
+
+class FetchJsonTest(unittest.TestCase):
+    def test_rejects_non_object_response(self) -> None:
+        body = io.BytesIO(json.dumps([lightweight_ref()]).encode())
+        with (
+            mock.patch.object(VERIFY.urllib.request, "urlopen", return_value=body),
+            self.assertRaisesRegex(
+                VERIFY.VerificationError,
+                re.escape(f"GitHub API response from {REF_URL} must be an object"),
+            ),
+        ):
+            VERIFY.fetch_json(REF_URL, "token")
+
+    def test_rejects_unreachable_api(self) -> None:
+        failure = VERIFY.urllib.error.HTTPError(REF_URL, 403, "Forbidden", {}, None)
+        with (
+            mock.patch.object(VERIFY.urllib.request, "urlopen", side_effect=failure),
+            self.assertRaisesRegex(
+                VERIFY.VerificationError,
+                re.escape(f"GitHub API request failed for {REF_URL}: HTTP Error 403"),
+            ),
+        ):
+            VERIFY.fetch_json(REF_URL, "token")
+
+
+class MainTest(unittest.TestCase):
+    def test_lightweight_tag_costs_one_request(self) -> None:
+        status, urls = run_main([lightweight_ref()])
+        self.assertEqual(status, 0)
+        self.assertEqual(urls, [REF_URL])
+
+    def test_rejects_lightweight_tag_over_another_commit(self) -> None:
+        ref_payload = lightweight_ref()
+        ref_payload["object"] = {"type": "commit", "sha": "3" * 40}
+        with self.assertRaisesRegex(VERIFY.VerificationError, "remote ref names"):
+            run_main([ref_payload])
+
+    def test_annotated_tag_costs_two_requests(self) -> None:
+        status, urls = run_main(list(annotated_payloads()))
+        self.assertEqual(status, 0)
+        self.assertEqual(urls, [REF_URL, TAG_URL])
+
+    def test_rejects_missing_environment(self) -> None:
+        for name in (
+            "GITHUB_REPOSITORY",
+            "GITHUB_REF_NAME",
+            "GITHUB_SHA",
+            "GITHUB_TOKEN",
+        ):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(
+                    VERIFY.VerificationError, f"missing required environment: {name}"
+                ):
+                    run_main([lightweight_ref()], omit=name)
 
 
 if __name__ == "__main__":
