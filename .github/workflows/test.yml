@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           action=.github/actions/verify-tag-on-main
-          verifier_pin=cc414b052cfdee5da63b1e8cf2b8486521de3d2e
+          verifier_pin=2281a3ea884422db190de44fad65ce9bc08b19c4
           python3 -m py_compile "$action/verify.py" "$action/test_verify.py"
           python3 "$action/test_verify.py"
           for workflow in \

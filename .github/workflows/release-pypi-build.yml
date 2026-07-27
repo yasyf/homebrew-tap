@@ -83,7 +83,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@cc414b052cfdee5da63b1e8cf2b8486521de3d2e
+      - uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@2281a3ea884422db190de44fad65ce9bc08b19c4
 
   build:
     # Pure uv_build path. Runs only after exact release-tag verification.

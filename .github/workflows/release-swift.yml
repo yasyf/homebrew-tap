@@ -91,7 +91,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify the tag is on main
-        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@cc414b052cfdee5da63b1e8cf2b8486521de3d2e
+        uses: yasyf/homebrew-tap/.github/actions/verify-tag-on-main@2281a3ea884422db190de44fad65ce9bc08b19c4
 
       - name: Resolve the release tag
         id: tag
