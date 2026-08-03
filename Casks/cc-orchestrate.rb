@@ -2,27 +2,16 @@
 cask "cc-orchestrate" do
   binary "cc-orchestrate", target: "cco"
 
-  version "0.15.3"
+  version "0.16.0"
 
   on_macos do
     on_intel do
-      sha256 "3d2ef8c46ab5b5ec7918dc99f0ef6ab253e1124808c2addf523507a371f315c7"
+      sha256 "2330b0ee1e7cfad2cc421aca255d1f1829df27e536fd41e71f51231febd9dfac"
       url "https://github.com/yasyf/cc-orchestrate/releases/download/v#{version}/cc-orchestrate_#{version}_darwin_amd64.tar.gz"
     end
     on_arm do
-      sha256 "8b6b9d8f7527371d73dbe570685b917bb39e44c66a4c08b8b045776aa08cc5fb"
+      sha256 "e58399ba0188e4ef3a8b20898657341908dfc7b1c7448193b08fd403dfad2d6f"
       url "https://github.com/yasyf/cc-orchestrate/releases/download/v#{version}/cc-orchestrate_#{version}_darwin_arm64.tar.gz"
-    end
-  end
-
-  on_linux do
-    on_intel do
-      sha256 "69efbdb383cb76ce3c602b45732e98bec44a702c6f908129cbb3acd91e43a299"
-      url "https://github.com/yasyf/cc-orchestrate/releases/download/v#{version}/cc-orchestrate_#{version}_linux_amd64.tar.gz"
-    end
-    on_arm do
-      sha256 "e38061f1205ac1332e17f8aea2524984d0109c2d7174a12b5331d89553eb4866"
-      url "https://github.com/yasyf/cc-orchestrate/releases/download/v#{version}/cc-orchestrate_#{version}_linux_arm64.tar.gz"
     end
   end
 
