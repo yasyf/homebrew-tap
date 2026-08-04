@@ -11,7 +11,7 @@
 class CcNotes < Formula
   desc "Git-native notes and tasks layer for agents"
   homepage "https://github.com/yasyf/cc-notes"
-  version "0.50.0"
+  version "0.51.1"
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -21,28 +21,28 @@ class CcNotes < Formula
 
   on_macos do
     resource "helper" do
-      url "https://github.com/yasyf/cc-notes/releases/download/v0.50.0/cc-notes-helper-v0.50.0-darwin.zip", using: :nounzip
-      sha256 "0ae92f13aa29650c40c9a1f7abd29b585d19de86b92d0738b9960bf39fb988df"
+      url "https://github.com/yasyf/cc-notes/releases/download/v0.51.1/cc-notes-helper-v0.51.1-darwin.zip", using: :nounzip
+      sha256 "fe3306093f4293a46a70881d59e114f662f2a20989c33e00472377654dcff869"
     end
 
     on_arm do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_arm64"
-      sha256 "be981704a30d871f260af084a02b6be47099868979ce322da5dbface5104c449"
+      sha256 "a4bb406fcc7b1f3e00a33aa4df112d75afac9001116efea0de3b89880a5f99d2"
     end
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_amd64"
-      sha256 "6c435b1ce642e4337a6c4492bdfcd7f16880eed56e6751f3a4331b5e6b8d3ec2"
+      sha256 "4444f7589aafa761185171ed5a7383d85aa4ffa000f1fa31e103d1fa194f6585"
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_amd64"
-      sha256 "7b7a795a940927cc5831d12b361f4488287123fff5e98bead4860dcafbb5940f"
+      sha256 "ec450945b67216812ffa29c2ff49a6bbe29b97d1ad349736e76e4d9ce63f4434"
     end
     on_arm do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_arm64"
-      sha256 "d4ddb5ab508319ec824a3af0eebb5104e61a57741ea51a3601515169f6df0d55"
+      sha256 "9733bdd3d0d74c4f93fd55a845d94ac891ba4dce0f2ef54c7660d9f86bee4ee0"
     end
   end
 
