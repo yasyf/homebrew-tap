@@ -5,10 +5,10 @@
 class CaptainHook < Formula
   desc "Fast, configurable hooks for agent coding tools"
   homepage "https://github.com/yasyf/captain-hook"
-  version "12.21.6"
+  version "12.21.7"
   license "PolyForm-Noncommercial-1.0.0"
-  url "https://github.com/yasyf/captain-hook/releases/download/v12.21.6/captain-hook-v12.21.6-darwin.zip", using: :nounzip
-  sha256 "bef104c3705d06e26d09f6b19e062406befec704feaab8eb1a424037442e6116"
+  url "https://github.com/yasyf/captain-hook/releases/download/v12.21.7/captain-hook-v12.21.7-darwin.zip", using: :nounzip
+  sha256 "eb4e04a90d2f5e1fe37ffbc14c352d6f34654acb79507487d655cd572a212cef"
 
   depends_on macos: :sequoia
 
@@ -19,8 +19,11 @@ class CaptainHook < Formula
     system "/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", "Captain Hook.app"
     system "/usr/bin/xcrun", "stapler", "validate", "Captain Hook.app"
     libexec.install "Captain Hook.app"
+    # bash, not sh: binrun runs this wrapper as the descriptor's version command on
+    # every resolve, and an endpoint-security agent that deep-inspects /bin/sh can
+    # put seconds on each exec, enough to blow daemonkit's 10 s version timeout.
     (bin/"capt-hook-host").write <<~SH
-      #!/bin/sh
+      #!/bin/bash
       exec "$HOME/Applications/Captain Hook.app/Contents/Helpers/capt-hookd" "$@"
     SH
   end
