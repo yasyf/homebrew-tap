@@ -5,10 +5,10 @@
 class CaptainHook < Formula
   desc "Fast, configurable hooks for agent coding tools"
   homepage "https://github.com/yasyf/captain-hook"
-  version "12.22.4"
+  version "12.22.5"
   license "PolyForm-Noncommercial-1.0.0"
-  url "https://github.com/yasyf/captain-hook/releases/download/v12.22.4/captain-hook-v12.22.4-darwin.zip", using: :nounzip
-  sha256 "4cd96e906899cf6a01483b915116ca8e408ec0e9b26bb74af4a24843b2230465"
+  url "https://github.com/yasyf/captain-hook/releases/download/v12.22.5/captain-hook-v12.22.5-darwin.zip", using: :nounzip
+  sha256 "a6ff4b1a7dc6df2fcbfc2f9727fe2cac2120fe65dfae002b7ef0ec51f9c7cf6b"
 
   depends_on macos: :sequoia
 
@@ -26,10 +26,6 @@ class CaptainHook < Formula
       #!/bin/bash
       exec "$HOME/Applications/Captain Hook.app/Contents/Helpers/capt-hookd" "$@"
     SH
-  end
-
-  def post_install
-    system libexec/"Captain Hook.app/Contents/Helpers/capt-hookd", "package-install"
   end
 
   def caveats
