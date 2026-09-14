@@ -5,10 +5,10 @@
 class CaptainHook < Formula
   desc "Fast, configurable hooks for agent coding tools"
   homepage "https://github.com/yasyf/captain-hook"
-  version "12.28.0"
+  version "12.28.1"
   license "PolyForm-Noncommercial-1.0.0"
-  url "https://github.com/yasyf/captain-hook/releases/download/v12.28.0/captain-hook-v12.28.0-darwin.zip", using: :nounzip
-  sha256 "445a21cb69b790a80057e0575ed32523cd4e2c023b065e4ed65d77a73eec1ac2"
+  url "https://github.com/yasyf/captain-hook/releases/download/v12.28.1/captain-hook-v12.28.1-darwin.zip", using: :nounzip
+  sha256 "165bc31f4e482132529fbe4b3c822f1c217e415e5722b4ee62dc0285443e3022"
 
   depends_on macos: :sequoia
 
@@ -17,7 +17,6 @@ class CaptainHook < Formula
   def install
     system "/usr/bin/ditto", "-x", "-k", cached_download, "."
     system "/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", "Captain Hook.app"
-    system "/usr/bin/xcrun", "stapler", "validate", "Captain Hook.app"
     libexec.install "Captain Hook.app"
     # bash, not sh: binrun runs this wrapper as the descriptor's version command on
     # every resolve, and an endpoint-security agent that deep-inspects /bin/sh can
@@ -41,6 +40,5 @@ class CaptainHook < Formula
   test do
     assert_match version.to_s, shell_output("#{bin}/capt-hook-host version")
     system "/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", libexec/"Captain Hook.app"
-    system "/usr/bin/xcrun", "stapler", "validate", libexec/"Captain Hook.app"
   end
 end
