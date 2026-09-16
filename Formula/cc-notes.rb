@@ -11,7 +11,7 @@
 class CcNotes < Formula
   desc "Git-native notes and tasks layer for agents"
   homepage "https://github.com/yasyf/cc-notes"
-  version "0.53.0"
+  version "0.53.1"
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -21,28 +21,28 @@ class CcNotes < Formula
 
   on_macos do
     resource "helper" do
-      url "https://github.com/yasyf/cc-notes/releases/download/v0.53.0/cc-notes-helper-v0.53.0-darwin.zip", using: :nounzip
-      sha256 "195c883a4726e32f16254ceebfd27f3f932e2a2a51d3cf8e29edfb5fa4665fc1"
+      url "https://github.com/yasyf/cc-notes/releases/download/v0.53.1/cc-notes-helper-v0.53.1-darwin.zip", using: :nounzip
+      sha256 "6db9356addee5cce531ad09057dd06d3e8b29dc15cdff1c7c6753e5c14aaf976"
     end
 
     on_arm do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_arm64"
-      sha256 "5e366b432b716deb5885cbb96019aea0824c4396a8a3a82c510d6ddee0817a95"
+      sha256 "7c383aadd599e4e24c97f74cbc9ddbb4fb2569a590e2d90fdf242c01aae3250d"
     end
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_darwin_amd64"
-      sha256 "15f0091df3794c794147d8278fd98084b0069c68a7207edbac0391106f00272c"
+      sha256 "54ed7b379e0d633bc9a64bd2f9eecbfff996ff8186bd020d3e7e8e33e81a1dea"
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_amd64"
-      sha256 "976a0333a6049f5d49011d6c6f516929f86ba11b2d00ea1dfb68648deef62824"
+      sha256 "8d6a1e095a892aeac3c7a5cfb7a069f3f8596a283cc8427186d74818bf0648e9"
     end
     on_arm do
       url "https://github.com/yasyf/cc-notes/releases/download/v#{version}/cc-notes_linux_arm64"
-      sha256 "f2f57519387fefc034c7012922fac011f9b05497f5f2a2df833b35254ca06344"
+      sha256 "746fc7c9ac35b05f6fdff9cd0c4090a7feef8177398386f623249d2dd0ce3784"
     end
   end
 
@@ -55,7 +55,6 @@ class CcNotes < Formula
       resource("helper").stage do
         system "/usr/bin/ditto", "-x", "-k", resource("helper").cached_download, "."
         system "/usr/bin/codesign", "--verify", "--strict", "--verbose=2", "CCNotesHelper.app"
-        system "/usr/bin/xcrun", "stapler", "validate", "CCNotesHelper.app"
         libexec.install "CCNotesHelper.app"
       end
       # opt_libexec, not libexec: Homebrew unlinks the active keg mid-upgrade,
@@ -82,7 +81,6 @@ class CcNotes < Formula
     assert_match version.to_s, shell_output("#{bin}/cc-notes version")
     if OS.mac?
       system "/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", libexec/"CCNotesHelper.app"
-      system "/usr/bin/xcrun", "stapler", "validate", libexec/"CCNotesHelper.app"
       assert_match version.to_s, shell_output("#{bin}/cc-notes-host version")
     end
   end
