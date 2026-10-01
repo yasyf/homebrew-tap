@@ -40,6 +40,42 @@ jobs:
             exit 1
           fi
 
+  cask-gate-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise the release-go cask de-quarantine gate check against fixtures
+        run: |
+          set -euo pipefail
+          script="$RUNNER_TEMP/cask-gate.sh"
+          yq '.jobs.release.steps[] | select(.name == "Verify cask de-quarantine gates name the signing team") | .run' \
+            .github/workflows/release-go.yml > "$script"
+          test -s "$script"
+          gated() {
+            printf 'cask "%s" do\n  postflight do\n    requirement = %s\n    system_command("/usr/bin/xattr", args: ["%s", "com.apple.quarantine", bin], must_succeed: false) if verified\n  end\nend\n' \
+              "$1" "'\''anchor apple generic and certificate leaf[subject.OU] = \"$2\"'\''" "$3"
+          }
+          run_case() {
+            local name=$1 expect=$2; shift 2
+            local dir="$RUNNER_TEMP/$name"
+            mkdir -p "$dir/Casks"
+            cat > "$dir/Casks/$name.rb"
+            set +e
+            TAP_DIR="$dir" TEAM_ID=SXKCTF23Q2 bash "$script" > "$dir/out" 2>&1
+            local got=$?
+            set -e
+            if [ "$expect" = pass ] && [ "$got" -ne 0 ]; then echo "$name: expected pass"; cat "$dir/out"; exit 1; fi
+            if [ "$expect" = fail ] && [ "$got" -eq 0 ]; then echo "$name: expected fail"; cat "$dir/out"; exit 1; fi
+            echo "$name: ok ($expect)"
+          }
+          gated matching SXKCTF23Q2 -d | run_case matching pass
+          gated wrong-team ZZZZZZZZZZ -d | run_case wrong-team fail
+          gated recursive SXKCTF23Q2 -dr | run_case recursive fail
+          printf 'cask "ungated" do\n  postflight do\n    system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ungated"]\n  end\nend\n' | run_case ungated pass
+          printf 'cask "plain" do\n  binary "plain"\nend\n' | run_case plain pass
+          printf 'cask "steps" do\n  postflight_steps do\n    on_macos do\n      run "/usr/bin/codesign", args: ["--verify", "-R=anchor apple generic and certificate leaf[subject.OU] = \\"SXKCTF23Q2\\"", "--", "{{staged_path}}/steps"]\n      run "/usr/bin/xattr", args: ["-d", "com.apple.quarantine", "{{staged_path}}/steps"], must_succeed: false\n    end\n  end\nend\n' | run_case steps pass
+          grep -q 'without a codesign gate' "$RUNNER_TEMP/ungated/out"
+
   actionlint:
     runs-on: ubuntu-latest
     steps:

@@ -232,6 +232,34 @@ jobs:
           }
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
+      - name: Verify cask de-quarantine gates name the signing team
+        if: ${{ inputs.signer == 'codesign' && steps.tag.outputs.prerelease == 'false' }}
+        env:
+          TAP_DIR: ${{ steps.homebrew.outputs.dir }}
+        run: |
+          set -euo pipefail
+          test -n "${TEAM_ID:-}" || { echo "::error::TEAM_ID is unset; import-developer-id did not run"; exit 1; }
+          status=0
+          for cask in "$TAP_DIR"/Casks/*.rb; do
+            [ -f "$cask" ] || continue
+            grep -q 'com.apple.quarantine' "$cask" || continue
+            gates="$(grep -oE 'subject\.OU\] = "[A-Z0-9]+"' "$cask" | grep -oE '[A-Z0-9]{10}' | sort -u || true)"
+            if [ -z "$gates" ]; then
+              echo "::warning file=$cask::strips com.apple.quarantine without a codesign gate"
+              continue
+            fi
+            if grep -q -- '"-dr"' "$cask"; then
+              echo "::error file=$cask::recursive com.apple.quarantine strip behind a codesign gate"
+              status=1
+            fi
+            for gate in $gates; do
+              [ "$gate" = "$TEAM_ID" ] && continue
+              echo "::error file=$cask::de-quarantine gate names team $gate but this release signs as $TEAM_ID"
+              status=1
+            done
+          done
+          exit "$status"
+
       - name: Record the exact release asset manifest
         uses: yasyf/homebrew-tap/.github/actions/go-release-manifest@bf445e75275fc12e276e06fc3b970a18f033b6d8
         with:

@@ -17,6 +17,10 @@ provenance; floating family tags are never runtime dependencies.
 
 ## Unreleased (`v1` family)
 
+- `release-go.yml` verifies, on the codesign lane, that every rendered cask that
+  strips `com.apple.quarantine` behind a `codesign` gate names the release's own
+  Team ID and strips one file, not a tree. A cask that strips without a gate
+  only warns, so existing ungated casks keep releasing.
 - `verify-tag-on-main` accepts a lightweight tag. The gate demanded a GPG
   signature from a pinned release key plus an annotated tag object, so cutting a
   release meant carrying that key on whatever machine did the tagging; a plain
