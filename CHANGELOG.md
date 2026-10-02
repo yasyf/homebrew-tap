@@ -17,6 +17,16 @@ provenance; floating family tags are never runtime dependencies.
 
 ## Unreleased (`v1` family)
 
+- `release-swift.yml` renders a signature-verified de-quarantine postflight into
+  the standard binary cask: `codesign --verify --strict` checks the staged
+  binary against the release's own Team ID and the product identifier, a
+  failed requirement raises, and only then is `com.apple.quarantine` stripped
+  from that one file — never `-dr`, and only when the attribute is present. The
+  rendered cask is then gated the way `release-go.yml` gates its casks: the
+  gate must name the signing team, and a foreign team or a recursive strip
+  fails the release before the cask is published or the tap delivery bundle is
+  packaged. `test.yml` exercises the gate
+  against fixtures and against the template exactly as rendered.
 - `release-go.yml` verifies, on the codesign lane, that every rendered cask that
   strips `com.apple.quarantine` behind a `codesign` gate names the release's own
   Team ID and strips one file, not a tree. A cask that strips without a gate
