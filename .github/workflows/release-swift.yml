@@ -66,7 +66,7 @@ on:
         type: string
         default: "sequoia"
       cask-template:
-        description: 'path to a repo-provided cask .rb template (tokens __NAME__/__VERSION__/__SHA__/__DESC__/__HOMEPAGE__/__REPO__/__MACOS_FLOOR__); empty renders the standard binary cask'
+        description: 'path to a repo-provided cask .rb template (tokens __NAME__/__VERSION__/__SHA__/__DESC__/__HOMEPAGE__/__REPO__/__MACOS_FLOOR__/__TEAM_ID__); empty renders the standard binary cask'
         type: string
         default: ""
 
@@ -261,6 +261,23 @@ jobs:
 
             binary "__NAME__"
 
+            postflight do
+              staged = staged_path/"__NAME__"
+              requirement = 'anchor apple generic and certificate leaf[subject.OU] = "__TEAM_ID__" and identifier "__NAME__"'
+              verified = system_command "/usr/bin/codesign",
+                                        args:         ["--verify", "--strict", "-R=#{requirement}", "--", staged],
+                                        must_succeed: false
+              unless verified.success?
+                raise CaskError, "#{staged} is not signed by Developer ID team __TEAM_ID__ as identifier __NAME__; leaving com.apple.quarantine in place"
+              end
+              attributes = system_command("/usr/bin/xattr", args: [staged], must_succeed: true).stdout.lines.map(&:strip)
+              if attributes.include?("com.apple.quarantine")
+                system_command "/usr/bin/xattr",
+                               args:         ["-d", "com.apple.quarantine", staged],
+                               must_succeed: true
+              end
+            end
+
             livecheck do
               skip "Auto-generated on release."
             end
@@ -281,6 +298,35 @@ jobs:
             __HOMEPAGE__=${{ steps.meta.outputs.homepage }}
             __REPO__=${{ github.repository }}
             __MACOS_FLOOR__=${{ inputs.macos-floor }}
+            __TEAM_ID__=${{ env.TEAM_ID }}
+
+      - name: Verify cask de-quarantine gate names the signing team
+        if: ${{ steps.tag.outputs.prerelease == 'false' }}
+        env:
+          TAP_DIR: tap-staging
+        run: |
+          set -euo pipefail
+          test -n "${TEAM_ID:-}" || { echo "::error::TEAM_ID is unset; import-developer-id did not run"; exit 1; }
+          status=0
+          for cask in "$TAP_DIR"/Casks/*.rb; do
+            [ -f "$cask" ] || continue
+            grep -q 'com.apple.quarantine' "$cask" || continue
+            gates="$(grep -oE 'subject\.OU\] = "[A-Z0-9]+"' "$cask" | grep -oE '[A-Z0-9]{10}' | sort -u || true)"
+            if [ -z "$gates" ]; then
+              echo "::warning file=$cask::strips com.apple.quarantine without a codesign gate"
+              continue
+            fi
+            if grep -q -- '"-dr"' "$cask"; then
+              echo "::error file=$cask::recursive com.apple.quarantine strip behind a codesign gate"
+              status=1
+            fi
+            for gate in $gates; do
+              [ "$gate" = "$TEAM_ID" ] && continue
+              echo "::error file=$cask::de-quarantine gate names team $gate but this release signs as $TEAM_ID"
+              status=1
+            done
+          done
+          exit "$status"
 
       - name: Record the exact release asset manifest
         env:

@@ -76,6 +76,71 @@ jobs:
           printf 'cask "steps" do\n  postflight_steps do\n    on_macos do\n      run "/usr/bin/codesign", args: ["--verify", "-R=anchor apple generic and certificate leaf[subject.OU] = \\"SXKCTF23Q2\\"", "--", "{{staged_path}}/steps"]\n      run "/usr/bin/xattr", args: ["-d", "com.apple.quarantine", "{{staged_path}}/steps"], must_succeed: false\n    end\n  end\nend\n' | run_case steps pass
           grep -q 'without a codesign gate' "$RUNNER_TEMP/ungated/out"
 
+  swift-cask-gate-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise the release-swift cask de-quarantine gate check against fixtures
+        run: |
+          set -euo pipefail
+          script="$RUNNER_TEMP/swift-cask-gate.sh"
+          yq '.jobs.release.steps[] | select(.name == "Verify cask de-quarantine gate names the signing team") | .run' \
+            .github/workflows/release-swift.yml > "$script"
+          test -s "$script"
+          gated() {
+            printf 'cask "%s" do\n  postflight do\n    requirement = %s\n    system_command("/usr/bin/xattr", args: ["%s", "com.apple.quarantine", bin], must_succeed: false) if verified\n  end\nend\n' \
+              "$1" "'\''anchor apple generic and certificate leaf[subject.OU] = \"$2\"'\''" "$3"
+          }
+          run_case() {
+            local name=$1 expect=$2; shift 2
+            local dir="$RUNNER_TEMP/$name"
+            mkdir -p "$dir/Casks"
+            cat > "$dir/Casks/$name.rb"
+            set +e
+            TAP_DIR="$dir" TEAM_ID=SXKCTF23Q2 bash "$script" > "$dir/out" 2>&1
+            local got=$?
+            set -e
+            if [ "$expect" = pass ] && [ "$got" -ne 0 ]; then echo "$name: expected pass"; cat "$dir/out"; exit 1; fi
+            if [ "$expect" = fail ] && [ "$got" -eq 0 ]; then echo "$name: expected fail"; cat "$dir/out"; exit 1; fi
+            echo "$name: ok ($expect)"
+          }
+          gated matching SXKCTF23Q2 -d | run_case matching pass
+          gated wrong-team ZZZZZZZZZZ -d | run_case wrong-team fail
+          gated recursive SXKCTF23Q2 -dr | run_case recursive fail
+          printf 'cask "ungated" do\n  postflight do\n    system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ungated"]\n  end\nend\n' | run_case ungated pass
+          printf 'cask "plain" do\n  binary "plain"\nend\n' | run_case plain pass
+          grep -q 'without a codesign gate' "$RUNNER_TEMP/ungated/out"
+      - name: Gate the standard Swift cask as release-swift renders it
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/release-swift.yml
+          step() { yq ".jobs.release.steps[] | select(.name == \"$1\") | .run" "$workflow"; }
+          dir="$RUNNER_TEMP/rendered"
+          mkdir -p "$dir"
+          step "Materialize the cask template" > "$dir/materialize.sh"
+          step "Verify cask de-quarantine gate names the signing team" > "$dir/gate.sh"
+          yq '.runs.steps[0].run' .github/actions/render-formula/action.yml > "$dir/render.sh"
+          test -s "$dir/materialize.sh"
+          test -s "$dir/gate.sh"
+          test -s "$dir/render.sh"
+          CASK_TEMPLATE='' RUNNER_TEMP="$dir" bash "$dir/materialize.sh"
+          TEMPLATE="$dir/cask.rb.tmpl" OUTPUT=Casks/tool.rb STAGING="$dir/tap-staging" VERSION_IN=1.2.3 \
+            NAME='' CHECKSUMS='' GITHUB_OUTPUT="$dir/render-outputs" \
+            SUBSTITUTIONS=$'__NAME__=tool\n__SHA__=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n__DESC__=A tool\n__HOMEPAGE__=https://example.com\n__REPO__=example/tool\n__MACOS_FLOOR__=sequoia\n__TEAM_ID__=SXKCTF23Q2' \
+            bash "$dir/render.sh"
+          cask="$dir/tap-staging/Casks/tool.rb"
+          ruby -c "$cask"
+          TAP_DIR="$dir/tap-staging" TEAM_ID=SXKCTF23Q2 bash "$dir/gate.sh" > "$dir/out" 2>&1 || { cat "$dir/out"; exit 1; }
+          if grep -q 'without a codesign gate' "$dir/out"; then
+            echo "::error::the rendered Swift cask strips com.apple.quarantine behind a gate the release gate cannot see"
+            cat "$cask"
+            exit 1
+          fi
+          if TAP_DIR="$dir/tap-staging" TEAM_ID=ZZZZZZZZZZ bash "$dir/gate.sh"; then
+            echo "::error::the rendered Swift cask passed the gate under a foreign team"
+            exit 1
+          fi
+
   actionlint:
     runs-on: ubuntu-latest
     steps:
