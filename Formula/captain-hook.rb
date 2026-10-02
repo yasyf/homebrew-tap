@@ -5,10 +5,10 @@
 class CaptainHook < Formula
   desc "Fast, configurable hooks for agent coding tools"
   homepage "https://github.com/yasyf/captain-hook"
-  version "12.79.5"
+  version "12.79.6"
   license "PolyForm-Noncommercial-1.0.0"
-  url "https://github.com/yasyf/captain-hook/releases/download/v12.79.5/captain-hook-v12.79.5-darwin.zip", using: :nounzip
-  sha256 "f9681f8dfe1d20adff0211ae8e2940915c486f1839c86662c601a31bfe1c66ed"
+  url "https://github.com/yasyf/captain-hook/releases/download/v12.79.6/captain-hook-v12.79.6-darwin.zip", using: :nounzip
+  sha256 "95ba1fc42d16a823829851b03d174e3f41ae634be509dd5d04caa5b7d707a5f3"
 
   depends_on macos: :sequoia
 
