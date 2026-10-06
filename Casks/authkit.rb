@@ -15,8 +15,8 @@
 # tagged release — do not hand-edit; change the template at
 # authkit's .github/cask/authkit.rb.tmpl instead.
 cask "authkit" do
-  version "0.2.0"
-  sha256 "1dcab22e92addd15cdce724206dcfb541d3fb44737b923a0f216a434dd96fcfb" # app
+  version "0.2.2"
+  sha256 "96ccae596795145e8b69063ca6db6f3b3e0381354ff47ce9bbb309da032dcdb3" # app
 
   url "https://github.com/yasyf/authkit/releases/download/v#{version}/authkit-v#{version}-darwin.zip"
   name "authkit"
