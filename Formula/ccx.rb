@@ -13,7 +13,7 @@
 class Ccx < Formula
   desc "Compact codebase-context tools for AI agents"
   homepage "https://github.com/yasyf/cc-context"
-  version "0.72.50"
+  version "0.72.52"
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -42,22 +42,22 @@ class Ccx < Formula
   on_macos do
     on_arm do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_darwin_arm64.tar.gz"
-      sha256 "8d23d94317efe3cec97449fac78b5a56682d514e9fe05c90ae3bad88a4557385"
+      sha256 "633b1974933b2b477f7b3e17c03f5e9a1c8b432f85f93d024648d7a47e9b9a95"
     end
     on_intel do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_darwin_amd64.tar.gz"
-      sha256 "bfd4409a7808daac120d08faf5d1ae6c85f89eb323e8c6a2367e28a8827a685d"
+      sha256 "d35128fade542a257ee71e6d6f0b9b89d1e4c921a0f6d7167cbb141c2175df11"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_linux_arm64.tar.gz"
-      sha256 "9c378667722d70c382587d2e8e59f11e58680d580068ea8f221dd9c15a964d8a"
+      sha256 "43cf2b7a3cd8eb07fe05bdd8f4248e34a61d384067bec3158a7652ab868142fa"
     end
     on_intel do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_linux_amd64.tar.gz"
-      sha256 "b3b0c3dd76729dcb1520d64b29fb787356fa2d466cb5db03bb794b39dc2856f4"
+      sha256 "9ce58987b7947a295616680d28ec139af0e7587254a4e57844733edaf5531829"
     end
   end
 
