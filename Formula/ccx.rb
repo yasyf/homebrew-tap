@@ -13,7 +13,7 @@
 class Ccx < Formula
   desc "Compact codebase-context tools for AI agents"
   homepage "https://github.com/yasyf/cc-context"
-  version "0.76.17"
+  version "0.76.18"
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -42,22 +42,22 @@ class Ccx < Formula
   on_macos do
     on_arm do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_darwin_arm64.tar.gz"
-      sha256 "e85b0a8332441182eb7ceaf99be52547890675e23ba882dfcca9be86897425e1"
+      sha256 "::error::no checksum for ccx_0.76.18_darwin_arm64.tar.gz in dist/checksums.txt"
     end
     on_intel do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_darwin_amd64.tar.gz"
-      sha256 "a09d2c47fefc321b81128b4681362298d8b412b88081435f884b2596ae8c5c3d"
+      sha256 "::error::no checksum for ccx_0.76.18_darwin_amd64.tar.gz in dist/checksums.txt"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_linux_arm64.tar.gz"
-      sha256 "4da14742563536aed791522a1817da04f34e728f11666dd8b222ce83ad11f2ee"
+      sha256 "::error::no checksum for ccx_0.76.18_linux_arm64.tar.gz in dist/checksums.txt"
     end
     on_intel do
       url "https://github.com/yasyf/cc-context/releases/download/v#{version}/ccx_#{version}_linux_amd64.tar.gz"
-      sha256 "a9731d84ef913a863cf8f0a60760ae1702e44e202d45894be9407f8fff8fdd82"
+      sha256 "::error::no checksum for ccx_0.76.18_linux_amd64.tar.gz in dist/checksums.txt"
     end
   end
 
