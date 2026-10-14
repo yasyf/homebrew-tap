@@ -17,6 +17,15 @@ provenance; floating family tags are never runtime dependencies.
 
 ## Unreleased (`v1` family)
 
+- `sign-notarize-app` and `release-app.yml` retry `stapler staple` and
+  `stapler validate` when Apple's ticketing service drops the connection. Three
+  Captain Hook release attempts failed there with `NSURLErrorDomain -1005`,
+  each after notarization had returned `Accepted`. `stapler(1)` reports that as
+  `EX_NOHOST` (68), so only that status is retried: three attempts, waiting 30s
+  and then 60s. Any other status fails on the first attempt and a third
+  `EX_NOHOST` fails the release, so a bundle still ships only with a stapled
+  ticket that validated. `release-app.yml` pins the action commit that ships
+  this.
 - `release-swift.yml` renders a signature-verified de-quarantine postflight into
   the standard binary cask: `codesign --verify --strict` checks the staged
   binary against the release's own Team ID and the product identifier, a
