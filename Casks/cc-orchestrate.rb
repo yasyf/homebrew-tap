@@ -3,28 +3,27 @@ cask "cc-orchestrate" do
   binary "cc-orchestrate", target: "cco"
   postflight_steps do
     on_macos do
-      run "/usr/bin/codesign", args: ["--verify", "--strict", "-R=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = \"SXKCTF23Q2\"", "--", "{{staged_path}}/cc-orchestrate"]
+      run "/usr/bin/codesign", args: ["--verify", "--strict", '-R=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "SXKCTF23Q2"', "--", "{{staged_path}}/cc-orchestrate"]
       run "/usr/bin/xattr", args: ["-d", "com.apple.quarantine", "{{staged_path}}/cc-orchestrate"], must_succeed: false, print_stderr: false
     end
   end
 
-  version "0.18.3"
+  version "0.19.0"
 
   on_macos do
     on_arm do
-      sha256 "ede9ef8f2c90468241c841072d1cc3dc30ab190daabf5c46c18da8b9022387fb"
+      sha256 "730fb2cb9e502b8d7bf00a5c7039e39a9bd5f208e531055409ed2543593e03ff"
       url "https://github.com/yasyf/cc-orchestrate/releases/download/v#{version}/cc-orchestrate_#{version}_darwin_arm64.tar.gz"
     end
     on_intel do
-      sha256 "d78d902b3f3ade348a508fd3d4583adcf1830b626d291b7f8f4b186851944d56"
+      sha256 "a64f7a40cfa266c591c8c0f230324c837cf615d159ee9e062942a6231ef4246b"
       url "https://github.com/yasyf/cc-orchestrate/releases/download/v#{version}/cc-orchestrate_#{version}_darwin_amd64.tar.gz"
     end
   end
   on_linux do
-    on_intel do
-      sha256 "04bc71083f1d605ee9f0866f347f98c0b2b18ada0b2ee631d6d3d5459271a4b4"
-      url "https://github.com/yasyf/cc-orchestrate/releases/download/v#{version}/cc-orchestrate_#{version}_linux_amd64.tar.gz"
-    end
+    depends_on arch: :x86_64
+    sha256 "82d90508eaad823fc20818074e4987352341f6cec63b31f52fcc31e30f5b257a"
+    url "https://github.com/yasyf/cc-orchestrate/releases/download/v#{version}/cc-orchestrate_#{version}_linux_amd64.tar.gz"
   end
 
   name "cc-orchestrate"
