@@ -261,21 +261,9 @@ jobs:
 
             binary "__NAME__"
 
-            postflight do
-              staged = staged_path/"__NAME__"
-              requirement = 'anchor apple generic and certificate leaf[subject.OU] = "__TEAM_ID__" and identifier "__NAME__"'
-              verified = system_command "/usr/bin/codesign",
-                                        args:         ["--verify", "--strict", "-R=#{requirement}", "--", staged],
-                                        must_succeed: false
-              unless verified.success?
-                raise CaskError, "#{staged} is not signed by Developer ID team __TEAM_ID__ as identifier __NAME__; leaving com.apple.quarantine in place"
-              end
-              attributes = system_command("/usr/bin/xattr", args: [staged], must_succeed: true).stdout.lines.map(&:strip)
-              if attributes.include?("com.apple.quarantine")
-                system_command "/usr/bin/xattr",
-                               args:         ["-d", "com.apple.quarantine", staged],
-                               must_succeed: true
-              end
+            postflight_steps do
+              run "/usr/bin/codesign", args: ["--verify", "--strict", '-R=anchor apple generic and certificate leaf[subject.OU] = "__TEAM_ID__" and identifier "__NAME__"', "--", "{{staged_path}}/__NAME__"]
+              run "/usr/bin/xattr", args: ["-d", "com.apple.quarantine", "{{staged_path}}/__NAME__"], must_succeed: false, print_stderr: false
             end
 
             livecheck do

@@ -17,6 +17,18 @@ provenance; floating family tags are never runtime dependencies.
 
 ## Unreleased (`v1` family)
 
+- `release-swift.yml` renders the binary cask's de-quarantine as a
+  `postflight_steps` stanza instead of the Ruby `postflight` block Homebrew 7
+  deprecated, which warned on every `brew upgrade`. The `codesign --verify
+  --strict` requirement and the single-file `xattr -d` are unchanged; a failed
+  requirement now fails its step instead of raising `CaskError`, which still
+  aborts the install with the quarantine in place.
+- The `public-go-tap-delivery` cask renderer accepts GoReleaser 2.19's
+  `install_steps` and `uninstall_steps` hooks and renders them as the matching
+  `*_steps` stanzas. In hooks and `custom_block` it expands `{{ .StagedPath }}`,
+  `{{ .AppDir }}`, and quoted Homebrew tokens such as `{{ "{{user}}" }}` the way
+  GoReleaser does, and refuses any other template field and a phase that sets
+  both a Ruby hook and its steps.
 - `sign-notarize-app` and `release-app.yml` retry `stapler staple` and
   `stapler validate` when Apple's ticketing service drops the connection. Three
   Captain Hook release attempts failed there with `NSURLErrorDomain -1005`,

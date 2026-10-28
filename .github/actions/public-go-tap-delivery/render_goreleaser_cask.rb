@@ -26,6 +26,15 @@ def ruby_string(value)
   value.dump
 end
 
+def homebrew_tokens!(body, label)
+  rendered = body.gsub("{{ .StagedPath }}", "{{staged_path}}")
+                 .gsub("{{ .AppDir }}", "{{appdir}}")
+                 .gsub(/\{\{ "(\{\{[A-Za-z_][\w.]*\}\})" \}\}/, '\\1')
+  unsupported = rendered.scan(/\{\{.*?\}\}/).reject { |token| token.match?(/\A\{\{[A-Za-z_][\w.]*\}\}\z/) }
+  fail!("#{label} uses unsupported template fields: #{unsupported.uniq.inspect}") unless unsupported.empty?
+  rendered
+end
+
 def target_asset!(assets, os_name, arch)
   pattern = /(?:\A|_)#{Regexp.escape(os_name)}_#{Regexp.escape(arch)}(?:\.|_)/
   matches = assets.keys.select { |name| name.end_with?(".tar.gz") && name.match?(pattern) }.sort
@@ -108,16 +117,23 @@ end
 
 custom_block = cask["custom_block"]
 fail!("homebrew_casks.custom_block must be a string") if custom_block && !custom_block.is_a?(String)
+custom_block &&= homebrew_tokens!(custom_block, "homebrew_casks.custom_block")
 hooks = cask.fetch("hooks", {})
 fail!("homebrew_casks.hooks must be an object") unless hooks.is_a?(Hash)
 unknown_hook_phases = hooks.keys - %w[pre post]
 fail!("unsupported cask hook phases: #{unknown_hook_phases.inspect}") unless unknown_hook_phases.empty?
 hooks.each do |phase, operations|
   fail!("cask hook phase #{phase.inspect} must be an object") unless operations.is_a?(Hash)
-  unknown_operations = operations.keys - %w[install uninstall]
+  unknown_operations = operations.keys - %w[install uninstall install_steps uninstall_steps]
   fail!("unsupported cask hook operations: #{unknown_operations.inspect}") unless unknown_operations.empty?
+  %w[install uninstall].each do |operation|
+    if operations.key?(operation) && operations.key?("#{operation}_steps")
+      fail!("cask hook #{phase} sets both #{operation} and #{operation}_steps")
+    end
+  end
   operations.each do |operation, body|
     fail!("cask hook #{phase}.#{operation} must be a non-empty string") unless body.is_a?(String) && !body.empty?
+    operations[operation] = homebrew_tokens!(body, "cask hook #{phase}.#{operation}")
   end
 end
 
@@ -195,7 +211,11 @@ hook_names = {
   ["pre", "install"] => "preflight",
   ["post", "install"] => "postflight",
   ["pre", "uninstall"] => "uninstall_preflight",
-  ["post", "uninstall"] => "uninstall_postflight"
+  ["post", "uninstall"] => "uninstall_postflight",
+  ["pre", "install_steps"] => "preflight_steps",
+  ["post", "install_steps"] => "postflight_steps",
+  ["pre", "uninstall_steps"] => "uninstall_preflight_steps",
+  ["post", "uninstall_steps"] => "uninstall_postflight_steps"
 }
 hooks.each do |phase, operations|
   operations.each do |operation, body|
