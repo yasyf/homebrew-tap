@@ -73,8 +73,9 @@ jobs:
           gated recursive SXKCTF23Q2 -dr | run_case recursive fail
           printf 'cask "ungated" do\n  postflight do\n    system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ungated"]\n  end\nend\n' | run_case ungated pass
           printf 'cask "plain" do\n  binary "plain"\nend\n' | run_case plain pass
-          printf 'cask "steps" do\n  postflight_steps do\n    on_macos do\n      run "/usr/bin/codesign", args: ["--verify", "-R=anchor apple generic and certificate leaf[subject.OU] = \\"SXKCTF23Q2\\"", "--", "{{staged_path}}/steps"]\n      run "/usr/bin/xattr", args: ["-d", "com.apple.quarantine", "{{staged_path}}/steps"], must_succeed: false\n    end\n  end\nend\n' | run_case steps pass
+          printf 'cask "steps" do\n  postflight_steps do\n    on_macos do\n      run "/usr/bin/codesign", args: ["--verify", '\''-R=anchor apple generic and certificate leaf[subject.OU] = "SXKCTF23Q2"'\'', "--", "{{staged_path}}/steps"]\n      run "/usr/bin/xattr", args: ["-d", "com.apple.quarantine", "{{staged_path}}/steps"], must_succeed: false\n    end\n  end\nend\n' | run_case steps pass
           grep -q 'without a codesign gate' "$RUNNER_TEMP/ungated/out"
+          if grep -q 'without a codesign gate' "$RUNNER_TEMP/steps/out"; then echo "steps: gate not seen"; cat "$RUNNER_TEMP/steps/out"; exit 1; fi
 
   swift-cask-gate-contract:
     runs-on: ubuntu-latest
