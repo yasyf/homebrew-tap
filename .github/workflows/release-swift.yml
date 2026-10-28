@@ -257,7 +257,7 @@ jobs:
             desc "__DESC__"
             homepage "__HOMEPAGE__"
 
-            depends_on macos: ">= :__MACOS_FLOOR__"
+            depends_on macos: :__MACOS_FLOOR__
 
             binary "__NAME__"
 
