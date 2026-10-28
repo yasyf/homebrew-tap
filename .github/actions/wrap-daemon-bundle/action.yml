@@ -229,8 +229,8 @@ runs:
             echo "::error::notarization not Accepted for $app (submission $sid)"; exit 1
           fi
           # Staple so a quarantined install validates offline (an .app can be stapled).
-          xcrun stapler staple "$app"
-          xcrun stapler validate "$app"
+          "$GITHUB_ACTION_PATH/../stapler-retry/stapler-retry.sh" staple "$app"
+          "$GITHUB_ACTION_PATH/../stapler-retry/stapler-retry.sh" validate "$app"
         fi
 
         echo "bundle-path=$app" >> "$GITHUB_OUTPUT"
