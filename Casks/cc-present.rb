@@ -2,26 +2,26 @@
 cask "cc-present" do
   postflight_steps do
     on_macos do
-      run "/usr/bin/codesign", args: ["--verify", "--strict", "-R=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = \"SXKCTF23Q2\"", "--", "{{staged_path}}/cc-present"]
+      run "/usr/bin/codesign", args: ["--verify", "--strict", '-R=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "SXKCTF23Q2"', "--", "{{staged_path}}/cc-present"]
       run "/usr/bin/xattr", args: ["-d", "com.apple.quarantine", "{{staged_path}}/cc-present"], must_succeed: false, print_stderr: false
     end
   end
 
-  version "0.52.23"
+  version "0.52.24"
 
   on_macos do
     on_arm do
-      sha256 "c750bd32233048ebe8299d436607f97f0a6707e4432bfe7a776220f863bc7406"
+      sha256 "2d41c0bc21929514a921460cb26129c4b0743519888ef8b0d15253ae736b8b59"
       url "https://github.com/yasyf/cc-present/releases/download/v#{version}/cc-present_#{version}_darwin_arm64.tar.gz"
     end
     on_intel do
-      sha256 "d662f3d6a125cf918cc74eb8a4cbd7e33064497bedc41c9e39adab66cda2c5d5"
+      sha256 "8cdbd3df23a601a9be0263a5a4214760afa0f3fa5d24e1c4a91fb71e9bb34c12"
       url "https://github.com/yasyf/cc-present/releases/download/v#{version}/cc-present_#{version}_darwin_amd64.tar.gz"
     end
   end
   on_linux do
     depends_on arch: :x86_64
-    sha256 "19db2c33008ebda3ac59c3756a10e6ad3247a87377dc9b240b6a4bdeb6884740"
+    sha256 "bc314889c52382ef323216aa9259a6979ef1232b4448f69712028acd98ca8af4"
     url "https://github.com/yasyf/cc-present/releases/download/v#{version}/cc-present_#{version}_linux_amd64.tar.gz"
   end
 
