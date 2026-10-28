@@ -18,8 +18,8 @@
 # every tagged release — do not hand-edit; change the template at cookiesync's
 # .github/cask/cookiesync.rb.tmpl instead.
 cask "cookiesync" do
-  version "0.32.0"
-  sha256 "842da0cb6e7380b806eb390118b800cbe3f66f5868563acac284db59d7074d5c" # app
+  version "0.33.0"
+  sha256 "dcd2f1037bc236f1d4385a792e26e6696ec66ca2ec27f4aeaafc4a1992d4ee31" # app
 
   url "https://github.com/yasyf/cookiesync/releases/download/v#{version}/CookieSync-v#{version}-darwin.zip"
   name "cookiesync"
@@ -40,20 +40,11 @@ cask "cookiesync" do
   # quarantine strip on the bundle keeps a first exec friction-free even if the staple
   # check is skipped.
   #
-  # The helper plist names the versioned Caskroom bundle, which brew upgrade deletes,
-  # and a kickstart never rereads a plist. Rerun `cookiesync install` once the helper
-  # agent exists so synckitd rerenders and reloads it against this version.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args:         ["-dr", "com.apple.quarantine", "#{staged_path}/CookieSync.app"],
-                   must_succeed: false
-    helper_plist = File.expand_path("~/Library/LaunchAgents/com.github.yasyf.synckit.helper.cookiesync.plist")
-    if File.exist?(helper_plist)
-      system_command "#{HOMEBREW_PREFIX}/bin/cookiesync",
-                     args:         ["install"],
-                     env:          { "PATH" => "#{HOMEBREW_PREFIX}/bin:/usr/bin:/bin:/usr/sbin:/sbin" },
-                     must_succeed: false
-    end
+  # The helper plist names the versioned Caskroom bundle, which brew upgrade deletes.
+  # synckitd's reconcile tick sees the plist drift from this version's bundle and
+  # reinstalls its agents within 15 minutes, so the cask only strips quarantine.
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{staged_path}}/CookieSync.app"], must_succeed: false
   end
 
   caveats <<~EOS
