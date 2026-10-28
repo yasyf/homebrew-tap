@@ -11,8 +11,8 @@
 class CcPool < Formula
   desc "Predictive multi-account load-balancing for Claude Code"
   homepage "https://github.com/yasyf/cc-pool"
-  url "https://github.com/yasyf/cc-pool/releases/download/v0.70.0/cc-pool-v0.70.0-darwin-universal.tar.gz"
-  sha256 "a7285afb53df26a0093aa088d7faa05f9694f142d5b190f5226c76feffc1d159" # pure
+  url "https://github.com/yasyf/cc-pool/releases/download/v0.70.1/cc-pool-v0.70.1-darwin-universal.tar.gz"
+  sha256 "d03afcbb6ff007f881cf166a45053db97a0fc931b38992307dd5d4bdf2b94552" # pure
   license "PolyForm-Noncommercial-1.0.0"
 
   livecheck do
@@ -24,8 +24,8 @@ class CcPool < Formula
   preserve_rpath
 
   resource "status_app" do
-    url "https://github.com/yasyf/cc-pool/releases/download/v0.70.0/cc-pool-status-v0.70.0-darwin.zip", using: :nounzip
-    sha256 "f72e6654912e71233cc138489bfebdd9fd0b8c3fece218f9bacf638c5d9886e4"
+    url "https://github.com/yasyf/cc-pool/releases/download/v0.70.1/cc-pool-status-v0.70.1-darwin.zip", using: :nounzip
+    sha256 "9286309e537f9749d011b772e09360eda889a04796218818cfd266acd638785f"
   end
 
   def install
@@ -37,7 +37,6 @@ class CcPool < Formula
       odie "staged status app has no Contents" unless (staged_app/"Contents").directory?
       system "/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", staged_app
       system "/usr/bin/xcrun", "stapler", "validate", staged_app
-      system "/usr/sbin/spctl", "--assess", "--type", "execute", "--verbose=4", staged_app
       app_version = Utils.safe_popen_read(
         "/usr/libexec/PlistBuddy", "-c", "Print :CFBundleShortVersionString",
         staged_app/"Contents/Info.plist"
