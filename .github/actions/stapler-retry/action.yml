@@ -1,0 +1,12 @@
+name: Put stapler-retry.sh on PATH
+description: >-
+  Adds `stapler-retry.sh <staple|validate> <bundle>` to PATH for the job's later
+  steps. It runs `xcrun stapler`, retrying only exit 68 (EX_NOHOST), which
+  stapler reports when Apple's ticketing service drops the connection, up to 6x
+  with linear backoff; any other failure is terminal. macOS runners only.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: echo "$GITHUB_ACTION_PATH" >> "$GITHUB_PATH"

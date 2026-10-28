@@ -502,6 +502,7 @@ jobs:
             .github/actions/publish/reject-retired-surfaces.sh
             .github/actions/sign-notarize-app/write-sha256-sidecar.sh
             .github/actions/stage-draft-release/stage.sh
+            .github/actions/stapler-retry/stapler-retry.sh
             .github/actions/tap-delivery/tap-delivery.sh
             .github/actions/verify-tag-on-main/test.sh
             .github/actions/verify-tag-on-main/verify.sh
@@ -512,6 +513,37 @@ jobs:
           # script can't dodge linting (a stale list entry fails too).
           diff <(printf '%s\n' "${checked[@]}" | sort) <(find .github -type f -name '*.sh' | sort) \
             || { echo "::error::.sh files under .github/ do not match the shellchecked list in test.yml (see diff above)"; exit 1; }
+
+  stapler-retry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/stapler-retry
+      - name: stapler-retry retries only EX_NOHOST
+        run: |
+          set -euo pipefail
+          fake="$RUNNER_TEMP/fake-xcrun"
+          mkdir -p "$fake"
+          cat > "$fake/xcrun" <<'SH'
+          #!/usr/bin/env bash
+          calls="$(($(cat "$CALLS") + 1))"
+          echo "$calls" > "$CALLS"
+          read -ra statuses <<< "$STATUSES"
+          exit "${statuses[$((calls - 1))]}"
+          SH
+          chmod +x "$fake/xcrun"
+          export PATH="$fake:$PATH" CALLS="$RUNNER_TEMP/calls"
+          run() {
+            echo 0 > "$CALLS"
+            status=0
+            STATUSES="$1" stapler-retry.sh validate App.app || status=$?
+            test "$status" = "$2"
+            test "$(cat "$CALLS")" = "$3"
+          }
+          run "0" 0 1
+          run "65" 65 1
+          run "68 0" 0 2
+          run "68 65" 65 2
 
   go-release-manifest:
     runs-on: ubuntu-latest

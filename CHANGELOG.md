@@ -29,6 +29,14 @@ provenance; floating family tags are never runtime dependencies.
   `{{ .AppDir }}`, and quoted Homebrew tokens such as `{{ "{{user}}" }}` the way
   GoReleaser does, and refuses any other template field and a phase that sets
   both a Ruby hook and its steps.
+- New `stapler-retry` action puts `stapler-retry.sh <staple|validate> <bundle>` on
+  PATH, and `sign-notarize-app` and `wrap-daemon-bundle` call the same script.
+  It retries `EX_NOHOST` (68), what `stapler(1)` exits when Apple's CloudKit
+  ticketing service drops the connection, up to six times with linear backoff,
+  and fails at once on any other status. `wrap-daemon-bundle` did not retry
+  before: cookiesync v0.33.0 failed there with `NSURLErrorDomain -1005` after
+  notarization had returned `Accepted`. Release workflows that validate a
+  downloaded bundle add the action once and call `stapler-retry.sh validate`.
 - `sign-notarize-app` and `release-app.yml` retry `stapler staple` and
   `stapler validate` when Apple's ticketing service drops the connection. Three
   Captain Hook release attempts failed there with `NSURLErrorDomain -1005`,
