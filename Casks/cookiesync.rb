@@ -8,7 +8,7 @@
 # enclosing bundle, so the `binary` symlink into Contents/MacOS/cookiesync carries
 # that durable identity to every exec: the interactive CLI AND the synckit-driven
 # resident helper LaunchAgent (com.github.yasyf.synckit.helper.cookiesync), whose
-# plist Program is the bundle-inner binary this symlink resolves to.
+# plist Program is this symlink.
 #
 # The whole .app must stay intact — splitting it apart severs the bundle identity the
 # grant is keyed to — so the cask stages the bundle in place and only symlinks the
@@ -18,8 +18,8 @@
 # every tagged release — do not hand-edit; change the template at cookiesync's
 # .github/cask/cookiesync.rb.tmpl instead.
 cask "cookiesync" do
-  version "0.33.0"
-  sha256 "dcd2f1037bc236f1d4385a792e26e6696ec66ca2ec27f4aeaafc4a1992d4ee31" # app
+  version "0.34.0"
+  sha256 "9d34464cf1f04736fbda901117cc6e28378341587ee1f21a110fe63e02e18038" # app
 
   url "https://github.com/yasyf/cookiesync/releases/download/v#{version}/CookieSync-v#{version}-darwin.zip"
   name "cookiesync"
@@ -40,9 +40,9 @@ cask "cookiesync" do
   # quarantine strip on the bundle keeps a first exec friction-free even if the staple
   # check is skipped.
   #
-  # The helper plist names the versioned Caskroom bundle, which brew upgrade deletes.
-  # synckitd's reconcile tick sees the plist drift from this version's bundle and
-  # reinstalls its agents within 15 minutes, so the cask only strips quarantine.
+  # The helper plist names the stable /opt/homebrew/bin/cookiesync link, and synckitd's
+  # reconcile tick replaces a helper whose version differs from the installed one, so
+  # the cask only strips quarantine.
   postflight_steps do
     run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{staged_path}}/CookieSync.app"], must_succeed: false
   end
