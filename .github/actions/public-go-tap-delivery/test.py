@@ -186,7 +186,9 @@ class ContractTests(FailureAssertions):
 
 
 class CaskRendererTests(FailureAssertions):
-    def fixture(self, root: Path, *, formats: str = "[tar.gz]", delivery_name: str = "example") -> tuple[Path, Path, Path]:
+    def fixture(
+        self, root: Path, *, formats: str = "[tar.gz]", delivery_name: str = "example", hooks: tuple[str, ...] = ()
+    ) -> tuple[Path, Path, Path]:
         config = root / ".goreleaser.yaml"
         config.write_text(
             "\n".join(
@@ -206,6 +208,7 @@ class CaskRendererTests(FailureAssertions):
                     "      name: homebrew-tap",
                     "    homepage: https://github.com/yasyf/example",
                     "    description: Exact public example",
+                    *hooks,
                     "",
                 )
             )
@@ -258,6 +261,37 @@ class CaskRendererTests(FailureAssertions):
             result = self.run_renderer(config, metadata, output)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("exact artifact kind", result.stderr)
+
+    def test_cask_renderer_emits_install_steps_with_homebrew_tokens(self) -> None:
+        def hooks(*body: str) -> tuple[str, ...]:
+            return ("    hooks:", "      post:", *body)
+
+        steps = hooks(
+            "        install_steps: |",
+            '          run "/usr/bin/xattr", args: ["-d", "com.apple.quarantine", "{{ .StagedPath }}/example"],',
+            '              env: { "HOME" => "/Users/{{ "{{user}}" }}" }',
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            config, metadata, output = self.fixture(Path(raw), hooks=steps)
+            result = self.run_renderer(config, metadata, output)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            cask = output.read_text()
+            self.assertIn("  postflight_steps do\n", cask)
+            self.assertIn('"{{staged_path}}/example"', cask)
+            self.assertIn('"/Users/{{user}}"', cask)
+            self.assertEqual(subprocess.run(["ruby", "-c", str(output)], check=False).returncode, 0)
+        with tempfile.TemporaryDirectory() as raw:
+            unsupported = hooks("        install_steps: |", '          run "/bin/echo", args: ["{{ .Version }}"]')
+            config, metadata, output = self.fixture(Path(raw), hooks=unsupported)
+            result = self.run_renderer(config, metadata, output)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unsupported template fields", result.stderr)
+        with tempfile.TemporaryDirectory() as raw:
+            both = hooks("        install: |", '          system_command "/usr/bin/true"', *steps[2:])
+            config, metadata, output = self.fixture(Path(raw), hooks=both)
+            result = self.run_renderer(config, metadata, output)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("sets both install and install_steps", result.stderr)
 
 
 class SignatureTests(FailureAssertions):
