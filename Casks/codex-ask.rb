@@ -2,20 +2,20 @@
 cask "codex-ask" do
   postflight_steps do
     on_macos do
-      run "/usr/bin/codesign", args: ["--verify", "--strict", "-R=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = \"SXKCTF23Q2\"", "--", "{{staged_path}}/codex-ask"]
+      run "/usr/bin/codesign", args: ["--verify", "--strict", '-R=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "SXKCTF23Q2"', "--", "{{staged_path}}/codex-ask"]
       run "/usr/bin/xattr", args: ["-d", "com.apple.quarantine", "{{staged_path}}/codex-ask"], must_succeed: false, print_stderr: false
     end
   end
 
-  version "1.14.23"
+  version "1.14.24"
 
   on_macos do
     on_arm do
-      sha256 "5cd9556069d9f1e52d7e0f69bfedb69af27c99415811ecb77e99f7845af14e53"
+      sha256 "b36e5bf5204105ee3e602fc4c955e6087febad94e764282af16801cbd74a97d3"
       url "https://github.com/yasyf/cc-skills/releases/download/v#{version}/codex-ask_#{version}_darwin_arm64.tar.gz"
     end
     on_intel do
-      sha256 "32f69a6e721473630deb49cecf11c5ab90501f5a8cdc4156c6fe045a8e440d04"
+      sha256 "95d6f6e1c04358f1fea76224d0688773efdc30c9a152525cf3e716b6d831896a"
       url "https://github.com/yasyf/cc-skills/releases/download/v#{version}/codex-ask_#{version}_darwin_amd64.tar.gz"
     end
   end
