@@ -261,7 +261,7 @@ jobs:
 
             binary "__NAME__"
 
-            postflight_steps do
+            preflight_steps do
               run "/usr/bin/codesign", args: ["--verify", "--strict", '-R=anchor apple generic and certificate leaf[subject.OU] = "__TEAM_ID__" and identifier "__NAME__"', "--", "{{staged_path}}/__NAME__"]
               run "/usr/bin/xattr", args: ["-d", "com.apple.quarantine", "{{staged_path}}/__NAME__"], must_succeed: false, print_stderr: false
             end
