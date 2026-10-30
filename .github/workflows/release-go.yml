@@ -191,7 +191,7 @@ jobs:
 
       - name: Render the formula
         if: ${{ inputs.render-formula && steps.tag.outputs.prerelease == 'false' }}
-        uses: yasyf/homebrew-tap/.github/actions/render-formula@19c3d5013032ad9c88f9a8f1170d1f366c19b8d9
+        uses: yasyf/homebrew-tap/.github/actions/render-formula@5100f0394e7f0cdfc06ee736248d67203077b911
         with:
           template: ${{ inputs.formula-template }}
           name: ${{ inputs.formula-name }}
