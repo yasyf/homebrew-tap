@@ -16,6 +16,22 @@ permissions:
   contents: read
 
 jobs:
+  formula-render-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify required formula checksums fail before publication
+        run: |
+          set -euo pipefail
+          script="$RUNNER_TEMP/render-formula.sh"
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("runs").fetch("steps").fetch(0).fetch("run")' \
+            .github/actions/render-formula/action.yml > "$script"
+          RENDER_FORMULA_SCRIPT="$script" python3 .github/actions/render-formula/test.py
+
   retired-surfaces:
     runs-on: ubuntu-latest
     steps:
