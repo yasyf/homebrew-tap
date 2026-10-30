@@ -3,9 +3,9 @@ description: >-
   Fill a repo's hand-maintained .rb template into a staging dir, then hand the dir
   to the publish action. For the irreducible formulae goreleaser's brews block can't
   express (conditional install logic, a runtime File.exist? autodetect, a second
-  resource). Fills __VERSION__ and — when `name`+`checksums` are given — the four
-  standard __SHA_<OS>_<ARCH>__ tokens from a goreleaser checksums.txt; any extra
-  tokens come from `substitutions`. The publish action ships the result idempotently.
+  resource). Fills __VERSION__ and — when `name`+`checksums` are given — standard
+  __SHA_<OS>_<ARCH>__ tokens present in the template from a goreleaser checksums.txt;
+  any extra tokens come from `substitutions`. The publish action ships the result idempotently.
 
 inputs:
   template:
@@ -23,11 +23,11 @@ inputs:
     required: false
     default: ""
   name:
-    description: archive base name for the standard 4-arch sha lookup (omit to skip auto sha)
+    description: archive base name for standard checksum tokens present in the template (omit to skip auto sha)
     required: false
     default: ""
   checksums:
-    description: goreleaser checksums.txt used for the standard 4-arch sha lookup
+    description: goreleaser checksums.txt used for standard checksum token lookup
     required: false
     default: dist/checksums.txt
   substitutions:
@@ -74,13 +74,16 @@ runs:
           sha() {
             local f
             f="$(grep -E "  ${NAME}_${version}_$1\.tar\.gz\$" "$CHECKSUMS" | head -1 | cut -d' ' -f1)"
-            test -n "$f" || { echo "::error::no checksum for ${NAME}_${version}_$1.tar.gz in $CHECKSUMS"; exit 1; }
+            test -n "$f" || { echo "::error::no checksum for ${NAME}_${version}_$1.tar.gz in $CHECKSUMS" >&2; exit 1; }
             printf '%s' "$f"
           }
-          sed_inplace "__SHA_DARWIN_ARM64__" "$(sha darwin_arm64)"
-          sed_inplace "__SHA_DARWIN_AMD64__" "$(sha darwin_amd64)"
-          sed_inplace "__SHA_LINUX_ARM64__"  "$(sha linux_arm64)"
-          sed_inplace "__SHA_LINUX_AMD64__"  "$(sha linux_amd64)"
+          for platform in darwin_arm64 darwin_amd64 linux_arm64 linux_amd64; do
+            token="__SHA_$(printf '%s' "$platform" | tr '[:lower:]' '[:upper:]')__"
+            if grep -qF "$token" "$out.tmp"; then
+              checksum="$(sha "$platform")"
+              sed_inplace "$token" "$checksum"
+            fi
+          done
         fi
 
         if [ -n "$SUBSTITUTIONS" ]; then
