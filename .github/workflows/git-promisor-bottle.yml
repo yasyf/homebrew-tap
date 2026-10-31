@@ -71,7 +71,7 @@ jobs:
           for helper in git-send-email git-subtree git-jump git-credential-osxkeychain git-credential-netrc git-remote-http git-remote-https; do
             test -x "$fixed_prefix/libexec/git-core/$helper"
           done
-          brew test yasyf/tap/git-promisor
+          brew test --force yasyf/tap/git-promisor
           feature_dir="$RUNNER_TEMP/git-promisor-package/feature-worktree"
           mkdir "$feature_dir"
           "$fixed_prefix/bin/git" -C "$feature_dir" init --initial-branch=main

@@ -24,6 +24,11 @@ class GitPromisor < Formula
     regex(/href=.*?git[._-]v?(\d+(?:\.\d+)+)\.t/i)
   end
 
+  bottle do
+    root_url "https://github.com/yasyf/homebrew-tap/releases/download/git-promisor-2.56.0_1"
+    sha256 arm64_sequoia: "8863f7ff329d4cd79c804516887c6eaadfb849e5e4177cc21295754fa23cc4b0"
+  end
+
   depends_on "gettext" => :build
   depends_on "pkgconf" => :build
   depends_on "pcre2"
