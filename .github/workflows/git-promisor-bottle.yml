@@ -39,7 +39,7 @@ jobs:
           test "$(uname -m)" = arm64
           test "$(brew --prefix)" = /opt/homebrew
           mkdir -p "$RUNNER_TEMP/git-promisor-package"
-          shasum -a 256 Formula/git.rb > "$RUNNER_TEMP/git-promisor-package/formula.sha256"
+          shasum -a 256 Formula/git-promisor.rb > "$RUNNER_TEMP/git-promisor-package/formula.sha256"
           brew config > "$RUNNER_TEMP/git-promisor-package/brew-config.txt"
       - name: Stock Homebrew control
         run: |
@@ -56,20 +56,22 @@ jobs:
           set -euo pipefail
           brew tap --custom-remote yasyf/tap "$GITHUB_WORKSPACE"
           test "$(git -C "$(brew --repository yasyf/tap)" rev-parse HEAD)" = "$(git rev-parse HEAD)"
-          cmp Formula/git.rb "$(brew --repository yasyf/tap)/Formula/git.rb"
-          brew uninstall --ignore-dependencies homebrew/core/git
-          brew install --build-bottle --skip-link yasyf/tap/git
-          test -x /opt/homebrew/Cellar/git/2.56.0_1/bin/git
+          cmp Formula/git-promisor.rb "$(brew --repository yasyf/tap)/Formula/git-promisor.rb"
+          brew install --build-bottle --skip-link yasyf/tap/git-promisor
+          test -x /opt/homebrew/Cellar/git-promisor/2.56.0_1/bin/git
+          test -d "$(cat "$RUNNER_TEMP/git-promisor-package/stock-core-keg-before-build.txt")"
+          realpath /opt/homebrew/opt/git > "$RUNNER_TEMP/git-promisor-package/core-opt-after-build.txt"
+          cmp "$RUNNER_TEMP/git-promisor-package/stock-core-keg-before-build.txt" "$RUNNER_TEMP/git-promisor-package/core-opt-after-build.txt"
       - name: Full feature and native regression checks
         run: |
           set -euo pipefail
-          fixed_prefix=/opt/homebrew/Cellar/git/2.56.0_1
+          fixed_prefix=/opt/homebrew/Cellar/git-promisor/2.56.0_1
           test "$("$fixed_prefix/bin/git" version)" = 'git version 2.56.0'
           "$fixed_prefix/bin/git" version --build-options > "$RUNNER_TEMP/git-promisor-package/build-options.txt"
           for helper in git-send-email git-subtree git-jump git-credential-osxkeychain git-credential-netrc git-remote-http git-remote-https; do
             test -x "$fixed_prefix/libexec/git-core/$helper"
           done
-          brew test yasyf/tap/git
+          brew test yasyf/tap/git-promisor
           feature_dir="$RUNNER_TEMP/git-promisor-package/feature-worktree"
           mkdir "$feature_dir"
           "$fixed_prefix/bin/git" -C "$feature_dir" init --initial-branch=main
@@ -82,14 +84,17 @@ jobs:
           PATH="$fixed_prefix/bin:$PATH" PROBE_OUTPUT="$RUNNER_TEMP/git-promisor-package/context-fixed" python3 .oracle/scripts/promisor-context-probe.py
           python3 .oracle/scripts/promisor-context-parity.py "$RUNNER_TEMP/git-promisor-package/context-stock/report.json" "$RUNNER_TEMP/git-promisor-package/context-fixed/report.json" "$RUNNER_TEMP/git-promisor-package/context-parity.json"
           shasum -a 256 "$fixed_prefix/bin/git" > "$RUNNER_TEMP/git-promisor-package/git.sha256"
-          brew info --json=v2 yasyf/tap/git > "$RUNNER_TEMP/git-promisor-package/formula-info.json"
-          brew linkage --test yasyf/tap/git
+          brew info --json=v2 yasyf/tap/git-promisor > "$RUNNER_TEMP/git-promisor-package/formula-info.json"
+          brew linkage --test yasyf/tap/git-promisor
       - name: Bottle without publication
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/git-promisor-package"
-          brew bottle --json --root-url https://github.com/yasyf/homebrew-tap/releases/download/git-2.56.0_1 yasyf/tap/git
+          brew bottle --json --root-url https://github.com/yasyf/homebrew-tap/releases/download/git-promisor-2.56.0_1 yasyf/tap/git-promisor
           shasum -a 256 ./*.bottle.tar.gz ./*.bottle.json > bottle-files.sha256
+          test -d "$(cat stock-core-keg-before-build.txt)"
+          realpath /opt/homebrew/opt/git > core-opt-after-bottle.txt
+          cmp stock-core-keg-before-build.txt core-opt-after-bottle.txt
       - uses: actions/upload-artifact@v7
         if: always()
         with:

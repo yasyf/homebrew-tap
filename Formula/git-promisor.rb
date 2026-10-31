@@ -1,4 +1,4 @@
-class Git < Formula
+class GitPromisor < Formula
   desc "Distributed revision control system"
   homepage "https://git-scm.com"
   url "https://mirrors.edge.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz"
@@ -88,6 +88,7 @@ class Git < Formula
 
     if OS.mac?
       ENV["PERLLIB_EXTRA"] = %W[
+        #{MacOS.active_developer_dir}
         /Library/Developer/CommandLineTools
         /Applications/Xcode.app/Contents/Developer
       ].uniq.map do |p|
