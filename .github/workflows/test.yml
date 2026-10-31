@@ -16,6 +16,18 @@ permissions:
   contents: read
 
 jobs:
+  monotonic-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify monotonic formula publication under real Git races
+        run: |
+          set -euo pipefail
+          script="$RUNNER_TEMP/publish.sh"
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("runs").fetch("steps").find { |step| step.key?("run") }.fetch("run")' \
+            .github/actions/publish/action.yml > "$script"
+          PUBLISH_SCRIPT="$script" python3 .github/actions/publish/test_monotonic.py
+
   formula-render-contract:
     strategy:
       fail-fast: false
