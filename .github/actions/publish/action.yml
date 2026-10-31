@@ -20,6 +20,9 @@ inputs:
   message:
     description: Commit message for the tap.
     required: true
+  monotonic-file:
+    description: Exact staged formula path whose numeric version must not decrease; cannot combine with delete-file.
+    default: ''
   delete-file:
     description: >-
       Optional exact tap-relative tracked file to delete in the same commit as
@@ -43,27 +46,39 @@ runs:
       env:
         PUBLISH_DIR: ${{ inputs.dir }}
         PUBLISH_MSG: ${{ inputs.message }}
+        MONOTONIC_FILE: ${{ inputs.monotonic-file }}
         DELETE_FILE: ${{ inputs.delete-file }}
       run: |
         set -euo pipefail
         [ -d "$PUBLISH_DIR" ] || { echo "::error::publish dir '$PUBLISH_DIR' does not exist"; exit 1; }
+        if [ -n "$MONOTONIC_FILE" ] && [ -n "$DELETE_FILE" ]; then
+          echo "::error::monotonic-file cannot be combined with delete-file" >&2
+          exit 1
+        fi
         "$GITHUB_ACTION_PATH/reject-retired-surfaces.sh" "$PUBLISH_DIR"
-        # Merge the staged Formula//Casks/ files into the tap working tree.
-        cp -R "$PUBLISH_DIR"/. .tap-publish/
-        "$GITHUB_ACTION_PATH/delete-exact-file.sh" .tap-publish "$DELETE_FILE"
-        "$GITHUB_ACTION_PATH/reject-retired-surfaces.sh" .tap-publish
+        PUBLISH_DIR="$(cd "$PUBLISH_DIR" && pwd)"
+        stage_commit() {
+          if [ -n "$MONOTONIC_FILE" ]; then
+            decision="$(python3 "$GITHUB_ACTION_PATH/monotonic.py" "$PUBLISH_DIR/$MONOTONIC_FILE" "$MONOTONIC_FILE")"
+            if [ "$decision" = skip ]; then
+              echo "formula version is newer than the target; nothing to push"
+              exit 0
+            fi
+          fi
+          cp -R "$PUBLISH_DIR"/. ./
+          "$GITHUB_ACTION_PATH/delete-exact-file.sh" . "$DELETE_FILE"
+          "$GITHUB_ACTION_PATH/reject-retired-surfaces.sh" .
+          git add -A
+          if git diff --cached --quiet; then
+            echo "tap already up to date; nothing to push"
+            exit 0
+          fi
+          git commit -m "$PUBLISH_MSG"
+        }
         cd .tap-publish
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        # `git add -A` then check the STAGED diff so brand-new (untracked) files
-        # count as a change — the one place this logic lives, so it can't drift
-        # or regress per repo.
-        git add -A
-        if git diff --cached --quiet; then
-          echo "tap already up to date; nothing to push"
-          exit 0
-        fi
-        git commit -m "$PUBLISH_MSG"
+        stage_commit
         for attempt in 1 2 3; do
           if git push; then
             exit 0
@@ -73,5 +88,10 @@ runs:
             exit 1
           fi
           git fetch origin main
-          git rebase origin/main
+          if [ -n "$MONOTONIC_FILE" ]; then
+            git reset --hard origin/main
+            stage_commit
+          else
+            git rebase origin/main
+          fi
         done
