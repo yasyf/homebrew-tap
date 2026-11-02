@@ -3,7 +3,7 @@ class GitPromisor < Formula
   homepage "https://git-scm.com"
   url "https://mirrors.edge.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz"
   sha256 "26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3"
-  revision 1
+  revision 2
   license all_of: [
     "GPL-2.0-only",
     "GPL-2.0-or-later",
@@ -25,8 +25,8 @@ class GitPromisor < Formula
   end
 
   bottle do
-    root_url "https://github.com/yasyf/homebrew-tap/releases/download/git-promisor-2.56.0_1"
-    sha256 arm64_sequoia: "8863f7ff329d4cd79c804516887c6eaadfb849e5e4177cc21295754fa23cc4b0"
+    root_url "https://github.com/yasyf/homebrew-tap/releases/download/git-promisor-2.56.0_2"
+    sha256 arm64_sequoia: "7d9d8b4425916cb62720476932cff0022e7726b442dc1a6157858659e052c4e1"
   end
 
   depends_on "gettext" => :build
@@ -222,20 +222,121 @@ end
 __END__
 --- a/odb/source-packed.c
 +++ b/odb/source-packed.c
-@@ -348,14 +348,14 @@
- 	store->skip_mru_updates = true;
- 
- 	m = get_multi_pack_index(store);
+@@ -351,1 +351,1 @@
 -	if (m) {
 +	if (m && !(opts->flags & ODB_FOR_EACH_OBJECT_PROMISOR_ONLY)) {
- 		ret = for_each_prefixed_object_in_midx(store, m, opts, data);
- 		if (ret)
- 			goto out;
- 	}
- 
- 	for (e = packfile_store_get_packs(store); e; e = e->next) {
+@@ -358,1 +358,1 @@
 -		if (e->pack->multi_pack_index)
 +		if (e->pack->multi_pack_index && !(opts->flags & ODB_FOR_EACH_OBJECT_PROMISOR_ONLY))
- 			continue;
- 		if (should_exclude_pack(e->pack, opts->flags))
- 			continue;
+--- a/revision.c
++++ b/revision.c
+@@ -1652,0 +1653,16 @@
++}
++
++static int for_each_ref_excluding_hidden(struct ref_store *refs,
++					refs_for_each_cb fn, void *cb_data)
++{
++	struct all_refs_cb *cb = cb_data;
++	struct strvec excludes = STRVEC_INIT;
++	struct refs_for_each_ref_options opts = {
++		.exclude_patterns = get_namespaced_exclude_patterns(
++			hidden_refs_to_excludes(&cb->all_revs->ref_excludes.hidden_refs),
++			get_git_namespace(), &excludes),
++	};
++	int ret = refs_for_each_ref_ext(refs, fn, cb_data, &opts);
++
++	strvec_clear(&excludes);
++	return ret;
+@@ -2847,1 +2863,1 @@
+-		handle_refs(refs, revs, *flags, refs_for_each_ref);
++		handle_refs(refs, revs, *flags, for_each_ref_excluding_hidden);
+--- a/refs/ref-cache.c
++++ b/refs/ref-cache.c
+@@ -4,0 +5,1 @@
++#include "../strvec.h"
+@@ -279,6 +280,11 @@
+-/*
+- * Load all of the refs from `dir` (recursively) that could possibly
+- * contain references matching `prefix` into our in-memory cache. If
+- * `prefix` is NULL, prime unconditionally.
+- */
+-static void prime_ref_dir(struct ref_dir *dir, const char *prefix)
++static int ref_dir_is_excluded(const char *dirname,
++			       const struct strvec *excluded_prefixes)
++{
++	for (size_t i = 0; i < excluded_prefixes->nr; i++)
++		if (starts_with(dirname, excluded_prefixes->v[i]))
++			return 1;
++	return 0;
++}
++
++static void prime_ref_dir(struct ref_dir *dir, const char *prefix,
++			  const struct strvec *excluded_prefixes)
+@@ -295,5 +301,5 @@
+-		if (!(entry->flag & REF_DIR)) {
+-			/* Not a directory; no need to recurse. */
+-		} else if (!prefix) {
+-			/* Recurse in any case: */
+-			prime_ref_dir(get_ref_dir(entry), NULL);
++		if (!(entry->flag & REF_DIR) ||
++		    ref_dir_is_excluded(entry->name, excluded_prefixes))
++			continue;
++		if (!prefix) {
++			prime_ref_dir(get_ref_dir(entry), NULL, excluded_prefixes);
+@@ -308,1 +314,1 @@
+-				prime_ref_dir(get_ref_dir(entry), NULL);
++				prime_ref_dir(get_ref_dir(entry), NULL, excluded_prefixes);
+@@ -311,1 +317,1 @@
+-				prime_ref_dir(get_ref_dir(entry), prefix);
++				prime_ref_dir(get_ref_dir(entry), prefix, excluded_prefixes);
+@@ -376,0 +383,1 @@
++	struct strvec excluded_prefixes;
+@@ -418,0 +426,2 @@
++			if (ref_dir_is_excluded(entry->name, &iter->excluded_prefixes))
++				continue;
+@@ -453,1 +462,1 @@
+-		prime_ref_dir(dir, prefix);
++		prime_ref_dir(dir, prefix, &iter->excluded_prefixes);
+@@ -487,1 +496,1 @@
+-			prime_ref_dir(dir, refname);
++			prime_ref_dir(dir, refname, &iter->excluded_prefixes);
+@@ -554,0 +564,1 @@
++	strvec_clear(&iter->excluded_prefixes);
+@@ -566,1 +576,2 @@
+-					      int prime_dir)
++					      int prime_dir,
++					      const char **exclude_patterns)
+@@ -578,0 +590,7 @@
++	strvec_init(&iter->excluded_prefixes);
++	if (exclude_patterns)
++		for (size_t i = 0; exclude_patterns[i]; i++) {
++			const char *pattern = exclude_patterns[i];
++			if (!has_glob_specials(pattern) && !strchr(pattern, '\\'))
++				strvec_push(&iter->excluded_prefixes, pattern);
++		}
+--- a/refs/ref-cache.h
++++ b/refs/ref-cache.h
+@@ -204,7 +203,0 @@
+-/*
+- * Start iterating over references in `cache`. If `prefix` is
+- * specified, only include references whose names start with that
+- * prefix. If `prime_dir` is true, then fill any incomplete
+- * directories before beginning the iteration. The output is ordered
+- * by refname.
+- */
+@@ -214,1 +207,2 @@
+-					      int prime_dir);
++					      int prime_dir,
++					      const char **exclude_patterns);
+--- a/refs/files-backend.c
++++ b/refs/files-backend.c
+@@ -1098,1 +1098,2 @@
+-					      prefix, ref_store->repo, 1);
++					      prefix, ref_store->repo, 1,
++					      exclude_patterns);
+@@ -1494,1 +1495,1 @@
+-					refs->base.repo, 0);
++					refs->base.repo, 0, NULL);
+@@ -1534,1 +1535,1 @@
+-					refs->base.repo, 0);
++					refs->base.repo, 0, NULL);
