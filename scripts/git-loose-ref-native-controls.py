@@ -85,6 +85,8 @@ with tempfile.TemporaryDirectory(prefix="git-native-ref-controls-") as owned:
                     args = ["for-each-ref", "--format=%(refname) %(objectname)",
                             "--exclude=" + prefix + "refs/hidden", "--start-after=" + marker]
                     expected = [f"{name} {oid}" for name, oid in sorted(visible.items()) if name > marker]
+                    if layout == "packed" and namespace and marker == prefix + "refs/hidden":
+                        expected.insert(0, f"{alias} {oids['a']}")
                     before = run(baseline, repo, args, namespace=namespace)
                     after = run(candidate, repo, args, namespace=namespace)
                     row = {"fixture": label, "case": "explicit-seek", "marker": marker,
