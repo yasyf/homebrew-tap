@@ -17,17 +17,6 @@ state_path = state_dir / "state.json"
 scenario = os.environ["FAKE_GH_SCENARIO"]
 state_dir.mkdir(parents=True, exist_ok=True)
 
-if state_path.exists():
-    state = json.loads(state_path.read_text())
-else:
-    state = {
-        "list_calls": 0,
-        "post_calls": 0,
-        "releases": [],
-        "assets": [],
-        "next_asset_id": 1000,
-    }
-
 
 def save() -> None:
     state_path.write_text(json.dumps(state, sort_keys=True))
@@ -49,6 +38,31 @@ def release(release_id: int, tag: str, prerelease: bool, draft: bool = True) -> 
             "{?name,label}"
         ),
     }
+
+
+def published(release_id: int, tag: str, published_at: str | None, draft: bool = False) -> dict:
+    return {**release(release_id, tag, False, draft), "published_at": published_at}
+
+
+if state_path.exists():
+    state = json.loads(state_path.read_text())
+else:
+    state = {
+        "list_calls": 0,
+        "post_calls": 0,
+        "releases": [],
+        "assets": [],
+        "next_asset_id": 1000,
+        "notes_requests": [],
+        "create_payloads": [],
+    }
+    if scenario.startswith("notes"):
+        state["releases"] = [
+            published(89, "v1.1.0", "2026-01-01T00:00:00Z"),
+            published(90, "v1.2.2", "2026-02-01T00:00:00Z"),
+            published(91, "long-running--v0.7.9", "2026-03-01T00:00:00Z"),
+            published(92, "v1.2.4", None, draft=True),
+        ]
 
 
 if len(sys.argv) < 3 or sys.argv[1] != "api":
@@ -93,14 +107,36 @@ if method == "GET" and endpoint == f"{releases_endpoint}?per_page=100":
         emit(state["releases"])
     raise SystemExit(0)
 
+if method == "POST" and endpoint == f"{releases_endpoint}/generate-notes":
+    if input_path is None:
+        die("release notes request is missing")
+    request = json.loads(Path(input_path).read_text())
+    state["notes_requests"].append(request)
+    save()
+    if scenario.startswith("notes"):
+        emit({"name": request["tag_name"], "body": "* change\n" * 25000})
+    else:
+        emit({"name": request["tag_name"], "body": "## What's Changed\n"})
+    raise SystemExit(0)
+
 if method == "POST" and endpoint == releases_endpoint:
     if input_path is None:
         die("create payload is missing")
     payload = json.loads(Path(input_path).read_text())
     state["post_calls"] += 1
+    state["create_payloads"].append(payload)
+    if "generate_release_notes" in payload or len(payload["body"]) > 125000:
+        save()
+        die("HTTP 422: Validation Failed (body is too long)")
     if scenario == "delayed-list":
         created = release(101, payload["tag_name"], payload["prerelease"])
         state["releases"] = [created]
+        save()
+        emit(created)
+        raise SystemExit(0)
+    if scenario.startswith("notes"):
+        created = release(107, payload["tag_name"], payload["prerelease"])
+        state["releases"].append(created)
         save()
         emit(created)
         raise SystemExit(0)
