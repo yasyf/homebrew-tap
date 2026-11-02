@@ -777,6 +777,7 @@ jobs:
 
           run_stage() {
             scenario="$1"
+            tag="${2:-v1.2.3}"
             runtime="$RUNNER_TEMP/stage-$scenario"
             mkdir -p "$runtime"
             env \
@@ -785,9 +786,9 @@ jobs:
               FAKE_GH_STATE="$runtime/fake-state" \
               GH_TOKEN=test \
               GITHUB_REPOSITORY=example/project \
-              RELEASE_TAG=v1.2.3 \
+              RELEASE_TAG="$tag" \
               ASSET_MANIFEST="$RUNNER_TEMP/assets" \
-              RELEASE_TITLE=v1.2.3 \
+              RELEASE_TITLE="$tag" \
               RELEASE_PRERELEASE=false \
               RELEASE_RECOVERY_ATTEMPTS=3 \
               RELEASE_RECOVERY_DELAY_SECONDS=0 \
@@ -800,6 +801,25 @@ jobs:
           grep -Fxq 'release_id=101' "$RUNNER_TEMP/stage-delayed-list/outputs"
           test "$(jq -r .list_calls "$RUNNER_TEMP/stage-delayed-list/fake-state/state.json")" = 1
           cmp "$RUNNER_TEMP/tool.tar.gz" "$RUNNER_TEMP/stage-delayed-list/exact-release-101/tool.tar.gz"
+          delayed_state="$RUNNER_TEMP/stage-delayed-list/fake-state/state.json"
+          jq -e '.notes_requests == [{"tag_name": "v1.2.3"}]' "$delayed_state"
+          jq -e '.create_payloads[0].body == "## What'"'"'s Changed\n"' "$delayed_state"
+          jq -e '.create_payloads[0] | has("generate_release_notes") | not' "$delayed_state"
+
+          run_stage notes
+          grep -Fxq 'release_id=107' "$RUNNER_TEMP/stage-notes/outputs"
+          notes_state="$RUNNER_TEMP/stage-notes/fake-state/state.json"
+          jq -e '.notes_requests == [{"tag_name": "v1.2.3", "previous_tag_name": "v1.2.2"}]' "$notes_state"
+          jq -e '.create_payloads[0].body | length <= 125000' "$notes_state"
+          jq -e '.create_payloads[0].body
+            | endswith("Full changes: https://github.com/example/project/compare/v1.2.2...v1.2.3")' \
+            "$notes_state"
+
+          run_stage notes-family long-running--v0.7.10
+          grep -Fxq 'release_id=107' "$RUNNER_TEMP/stage-notes-family/outputs"
+          family_state="$RUNNER_TEMP/stage-notes-family/fake-state/state.json"
+          jq -e '.notes_requests == [{"tag_name": "long-running--v0.7.10", "previous_tag_name": "long-running--v0.7.9"}]' \
+            "$family_state"
 
           run_stage lost-response
           grep -Fxq 'release_id=102' "$RUNNER_TEMP/stage-lost-response/outputs"

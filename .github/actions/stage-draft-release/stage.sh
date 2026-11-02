@@ -57,6 +57,7 @@ case "${RELEASE_PRERELEASE:-}" in
 esac
 RELEASE_RECOVERY_ATTEMPTS="${RELEASE_RECOVERY_ATTEMPTS:-6}"
 RELEASE_RECOVERY_DELAY_SECONDS="${RELEASE_RECOVERY_DELAY_SECONDS:-1}"
+RELEASE_BODY_LIMIT=125000
 [[ "$RELEASE_RECOVERY_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] \
   || fail "release recovery attempts must be a positive integer"
 [[ "$RELEASE_RECOVERY_DELAY_SECONDS" =~ ^[0-9]+$ ]] \
@@ -78,22 +79,47 @@ done < "$ASSET_MANIFEST"
   || fail "asset basenames must be unique"
 sort -o "$names" "$names"
 
+releases="$RUNNER_TEMP/releases.json"
+gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" | jq -s 'add // []' > "$releases"
 matches="$RUNNER_TEMP/release-matches"
-gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-  | jq -r --arg tag "$RELEASE_TAG" \
-      '.[] | select(.tag_name == $tag) | [.id, .draft, .prerelease] | @tsv' \
-      > "$matches"
+jq -r --arg tag "$RELEASE_TAG" \
+  '.[] | select(.tag_name == $tag) | [.id, .draft, .prerelease] | @tsv' \
+  "$releases" > "$matches"
 count="$(wc -l < "$matches" | tr -d ' ')"
 [ "$count" -le 1 ] || fail "multiple releases exist for tag $RELEASE_TAG"
 
 if [ "$count" = 0 ]; then
   title="${RELEASE_TITLE:-$RELEASE_TAG}"
+  previous_tag="$(jq -r --arg tag "$RELEASE_TAG" '
+    def family: (capture("^(?<family>.*?)[0-9]+(\\.[0-9]+)*(-[0-9A-Za-z.]+)?$") | .family) // null;
+    ($tag | family) as $family
+    | [.[] | select(.draft == false and .tag_name != $tag and $family != null
+        and (.tag_name | family) == $family)]
+    | max_by(.published_at) | .tag_name // empty
+  ' "$releases")"
+  notes_request="$RUNNER_TEMP/release-notes-request.json"
+  jq -n --arg tag "$RELEASE_TAG" --arg previous "$previous_tag" \
+    '{tag_name: $tag} + (if $previous == "" then {} else {previous_tag_name: $previous} end)' \
+    > "$notes_request"
+  notes="$RUNNER_TEMP/release-notes.json"
+  gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+    --input "$notes_request" > "$notes"
+  if [ -n "$previous_tag" ]; then
+    changes_url="https://github.com/${GITHUB_REPOSITORY}/compare/${previous_tag}...${RELEASE_TAG}"
+  else
+    changes_url="https://github.com/${GITHUB_REPOSITORY}/commits/${RELEASE_TAG}"
+  fi
   payload="$RUNNER_TEMP/create-release.json"
   jq -n \
     --arg tag "$RELEASE_TAG" \
     --arg title "$title" \
     --argjson prerelease "$RELEASE_PRERELEASE" \
-    '{tag_name: $tag, name: $title, draft: true, prerelease: $prerelease, generate_release_notes: true}' \
+    --argjson limit "$RELEASE_BODY_LIMIT" \
+    --arg note $'\n\n---\nRelease notes truncated at the GitHub release body limit. Full changes: '"$changes_url" \
+    --slurpfile notes "$notes" \
+    '$notes[0].body as $body
+    | {tag_name: $tag, name: $title, draft: true, prerelease: $prerelease,
+       body: (if ($body | length) > $limit then $body[0:$limit - ($note | length)] + $note else $body end)}' \
     > "$payload"
   created="$RUNNER_TEMP/created-release.json"
   create_succeeded=false
