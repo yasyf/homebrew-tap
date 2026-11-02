@@ -220,7 +220,7 @@ jobs:
           args: ${{ inputs.maturin-args }}
           manylinux: ${{ matrix.manylinux }}
           sccache: ${{ inputs.sccache }}
-          before-script-linux: ${{ inputs.maturin-scripts != '' && matrix.manylinux != '' && format('set -eu; data="$(sed -n ''s/^module-name = "\(.*\)"$/\1/p'' pyproject.toml).data/scripts"; mkdir -p "$data"; for bin in {0}; do cargo build --release --locked --bin "$bin" --target {1}; install -m 755 "target/{1}/release/$bin" "$data/$bin"; done', inputs.maturin-scripts, matrix.target) || '' }}
+          before-script-linux: ${{ inputs.maturin-scripts != '' && matrix.manylinux != '' && format('set -eu; data="$(sed -n ''s/^module-name = "\(.*\)"$/\1/p'' pyproject.toml).data/scripts"; mkdir -p "$data"; for bin in {0}; do RUSTC_WRAPPER= cargo build --release --locked --bin "$bin" --target {1}; install -m 755 "target/{1}/release/$bin" "$data/$bin"; done', inputs.maturin-scripts, matrix.target) || '' }}
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ inputs.macosx-deployment-target }}
 
