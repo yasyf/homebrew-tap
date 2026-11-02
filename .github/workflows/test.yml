@@ -10,6 +10,7 @@ on:
     branches: [main]
     paths: [".github/**"]
   pull_request:
+    branches: [main]
     paths: [".github/**", "Casks/**", "Formula/**"]
 
 permissions:
