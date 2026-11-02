@@ -8,7 +8,7 @@ name: Test
 on:
   push:
     branches: [main]
-    paths: [".github/**", "Casks/**", "Formula/**"]
+    paths: [".github/**"]
   pull_request:
     paths: [".github/**", "Casks/**", "Formula/**"]
 
@@ -22,6 +22,7 @@ concurrency:
 jobs:
   monotonic-publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Verify monotonic formula publication under real Git races
@@ -38,6 +39,7 @@ jobs:
       matrix:
         os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest","macos-15"]') }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Verify required formula checksums fail before publication
@@ -50,6 +52,7 @@ jobs:
 
   retired-surfaces:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Reject standalone FuseKit runtime apps
@@ -74,6 +77,7 @@ jobs:
 
   cask-gate-contract:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Exercise the release-go cask de-quarantine gate check against fixtures
@@ -111,6 +115,7 @@ jobs:
 
   swift-cask-gate-contract:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Exercise the release-swift cask de-quarantine gate check against fixtures
@@ -176,6 +181,7 @@ jobs:
 
   actionlint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       # shellcheck is preinstalled on the runner, so actionlint also lints the
@@ -191,6 +197,7 @@ jobs:
 
   verify-tag-on-main-contract:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Exercise strict release-tag verification
@@ -215,6 +222,7 @@ jobs:
 
   release-tag-gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Reject every inexact tag shape
@@ -222,6 +230,7 @@ jobs:
 
   public-go-tap-contract:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Require an exact public-byte continuation
@@ -298,6 +307,7 @@ jobs:
 
   release-app-contract:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Require caller-owned application release publication
@@ -520,6 +530,7 @@ jobs:
 
   shellcheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: shellcheck the standalone scripts
@@ -548,6 +559,7 @@ jobs:
 
   stapler-retry:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/stapler-retry
@@ -579,6 +591,7 @@ jobs:
 
   go-release-manifest:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Install GoReleaser
@@ -748,6 +761,7 @@ jobs:
 
   stage-draft-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Exercise exact-ID creation and bounded recovery
@@ -810,6 +824,7 @@ jobs:
 
   immutable-tap-delivery:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Preserve release bytes and reject rebuilt or mutable delivery
@@ -965,6 +980,7 @@ jobs:
 
   inline-shell:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Extract and shellcheck the composite actions' run blocks
@@ -990,6 +1006,7 @@ jobs:
 
   publish-delete-file:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: Exercise exact tracked-file deletion
@@ -1076,6 +1093,7 @@ jobs:
       matrix:
         os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest","macos-15"]') }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
