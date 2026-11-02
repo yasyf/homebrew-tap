@@ -325,7 +325,7 @@ jobs:
 
       - name: Stage and verify the complete draft release
         id: draft
-        uses: yasyf/homebrew-tap/.github/actions/stage-draft-release@e4c3108e693681df1a3c666bae80e890bc44cf3e
+        uses: yasyf/homebrew-tap/.github/actions/stage-draft-release@b6e2e7152f80485e0bedbe013f35fad7652802fb
         with:
           token: ${{ github.token }}
           tag: ${{ needs.setup.outputs.tag }}
