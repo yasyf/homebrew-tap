@@ -16,7 +16,9 @@
 #     (cc-transcript — PyO3). The wheel ABI comes from the crate's pyo3 features, not this
 #     workflow: abi3-py313 → one cp313-abi3 wheel per platform; no abi3 feature → per-CPython.
 #     Requires package-subdir:'.' and no pre-build — the build jobs
-#     fail fast otherwise.
+#     fail fast otherwise. `maturin-scripts` names cargo binaries each wheel also ships
+#     as standalone scripts (cc-transcript's snapshot owner), built per target into the
+#     `<module-name>.data/scripts` folder maturin picks up on its own.
 #
 # Callers MUST use `secrets: inherit` (forwards GITHUB_TOKEN + any SENTRY_DSN a pre-build bakes).
 
@@ -45,6 +47,10 @@ on:
         description: args passed to PyO3/maturin-action (maturin only)
         type: string
         default: --release --out dist
+      maturin-scripts:
+        description: 'space-separated cargo binaries each maturin wheel ships as standalone scripts, built per target into `<module-name>.data/scripts` so installers put them in the env bin/ (maturin only)'
+        type: string
+        default: ""
       macosx-deployment-target:
         description: MACOSX_DEPLOYMENT_TARGET for maturin macOS wheels
         type: string
@@ -191,6 +197,22 @@ jobs:
       - name: Set version from tag
         run: uv version --frozen "${GITHUB_REF_NAME#v}"
 
+      - name: Build script binaries
+        if: ${{ inputs.maturin-scripts != '' && matrix.manylinux == '' }}
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ inputs.macosx-deployment-target }}
+          SCRIPTS: ${{ inputs.maturin-scripts }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          rustup target add "$TARGET"
+          data="$(sed -n 's/^module-name = "\(.*\)"$/\1/p' pyproject.toml).data/scripts"
+          mkdir -p "$data"
+          for bin in $SCRIPTS; do
+            cargo build --release --locked --bin "$bin" --target "$TARGET"
+            install -m 755 "target/$TARGET/release/$bin" "$data/$bin"
+          done
+
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -198,6 +220,7 @@ jobs:
           args: ${{ inputs.maturin-args }}
           manylinux: ${{ matrix.manylinux }}
           sccache: ${{ inputs.sccache }}
+          before-script-linux: ${{ inputs.maturin-scripts != '' && matrix.manylinux != '' && format('set -eu; data="$(sed -n ''s/^module-name = "\(.*\)"$/\1/p'' pyproject.toml).data/scripts"; mkdir -p "$data"; for bin in {0}; do cargo build --release --locked --bin "$bin" --target {1}; install -m 755 "target/{1}/release/$bin" "$data/$bin"; done', inputs.maturin-scripts, matrix.target) || '' }}
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ inputs.macosx-deployment-target }}
 
