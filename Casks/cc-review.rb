@@ -7,15 +7,15 @@ cask "cc-review" do
     end
   end
 
-  version "0.46.1"
+  version "0.46.2"
 
   on_macos do
     on_arm do
-      sha256 "2b3a8dfb24add3bf67225fef3bbdbf50dce14856ed345cc17d94d987a39631a3"
+      sha256 "81c271d3deefbf0157e4067e6e8e8997df9d9ce315b1683b3baf178f0d86bd7a"
       url "https://github.com/yasyf/cc-review/releases/download/v#{version}/cc-review_#{version}_darwin_arm64.tar.gz"
     end
     on_intel do
-      sha256 "a6bbd5e748191322a42e65470f2f13f8faa91290a77fd59e5d68f6eda9b41555"
+      sha256 "912c70532110b91504c4b298ddbe7997037fc0c44f4a8f9b11843c09bb86f4b6"
       url "https://github.com/yasyf/cc-review/releases/download/v#{version}/cc-review_#{version}_darwin_amd64.tar.gz"
     end
   end
