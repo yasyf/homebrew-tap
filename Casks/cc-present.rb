@@ -7,21 +7,21 @@ cask "cc-present" do
     end
   end
 
-  version "0.54.6"
+  version "0.54.7"
 
   on_macos do
     on_arm do
-      sha256 "6223c26a890eca7439f48335447c92de03cc41eaad68192b74cda9efe0f62830"
+      sha256 "7e37de714b69b94c27f861d2c0fec939a23985dd64e624488ee04b5e0dd34e91"
       url "https://github.com/yasyf/cc-present/releases/download/v#{version}/cc-present_#{version}_darwin_arm64.tar.gz"
     end
     on_intel do
-      sha256 "22ca94e6e7db44af4c7b291633ed0c95e88d425b9556e5cf6083c496a0b8ed4c"
+      sha256 "244eccac7b61bfbcd8cebff5b0498c4b4675a6001276e1c7dac495235edbc816"
       url "https://github.com/yasyf/cc-present/releases/download/v#{version}/cc-present_#{version}_darwin_amd64.tar.gz"
     end
   end
   on_linux do
     depends_on arch: :x86_64
-    sha256 "69071e53ac210711273171536b28a4e1194216cbead1361a7dc2e9b3dadc48b6"
+    sha256 "fb18c73dcf1ce8f6e5a002f85a3801974c814d8cc4d72154f91015b829943363"
     url "https://github.com/yasyf/cc-present/releases/download/v#{version}/cc-present_#{version}_linux_amd64.tar.gz"
   end
 
