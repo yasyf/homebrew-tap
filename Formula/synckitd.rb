@@ -7,7 +7,7 @@
 class Synckitd < Formula
   desc "Generic per-machine sync daemon for synckit consumers"
   homepage "https://github.com/yasyf/synckit"
-  version "0.51.3"
+  version "0.52.0"
 
   depends_on :macos
 
@@ -24,11 +24,11 @@ class Synckitd < Formula
   on_macos do
     on_arm do
       url "https://github.com/yasyf/synckit/releases/download/v#{version}/synckitd_#{version}_darwin_arm64.tar.gz"
-      sha256 "0a2601538189453fb356eb0c1e1017817f996f2a8255002329c0f182405acc99"
+      sha256 "295190e9eb82db26d4026133031bbe8a1d7fb425f07dc02bb6946adbbdabd80a"
     end
     on_intel do
       url "https://github.com/yasyf/synckit/releases/download/v#{version}/synckitd_#{version}_darwin_amd64.tar.gz"
-      sha256 "9552c1897b4dcffe79a46c5494ab5c6e470eea5d4571252dc02e198abb532e73"
+      sha256 "dc2b93b3b694e6a35dc85af61528fbfc4a597545a751192698c33cd3d39d1995"
     end
   end
 
