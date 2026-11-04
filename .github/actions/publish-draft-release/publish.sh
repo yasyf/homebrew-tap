@@ -6,6 +6,25 @@ fail() {
   exit 1
 }
 
+gh() {
+  local out err attempt
+  out="$(mktemp)"
+  err="$(mktemp)"
+  for attempt in 1 2 3 4 5; do
+    if command gh "$@" > "$out" 2> "$err"; then
+      cat "$err" >&2
+      cat "$out"
+      rm -f "$out" "$err"
+      return 0
+    fi
+    grep -qE 'HTTP 5[0-9]{2}' "$err" || break
+    sleep "$((attempt * attempt))"
+  done
+  cat "$err" >&2
+  rm -f "$out" "$err"
+  return 1
+}
+
 assert_unique_release() {
   expected_draft="$1"
   current="$RUNNER_TEMP/publish-current-release-matches"
