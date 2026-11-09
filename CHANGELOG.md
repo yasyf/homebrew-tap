@@ -17,6 +17,12 @@ provenance; floating family tags are never runtime dependencies.
 
 ## Unreleased (`v1` family)
 
+- `stage-draft-release` uploads every asset and downloads each back for its
+  byte check in parallel, and `publish-draft-release` downloads its byte checks
+  in parallel. Each upload still re-reads the release first and refuses one that
+  is no longer the same draft. A ccx release moved 225 MB through these checks
+  one asset at a time, three times over: 47s to stage, 29s to publish, 15s to
+  reverify.
 - `release-go.yml` restores its Go build and module cache from main instead of
   building cold. A release runs on its tag, which reads only its own and main's
   Actions caches, so every release compiled every dependency for every target
