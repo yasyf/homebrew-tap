@@ -40,7 +40,7 @@ on: { push: { branches: [main] } }
 permissions: { contents: read }
 jobs:
   warm:
-    uses: yasyf/homebrew-tap/.github/workflows/go-release-cache.yml@<the release-go.yml commit>
+    uses: yasyf/homebrew-tap/.github/workflows/go-release-cache.yml@<exact commit>
     with: { setup-bun: true }
 ```
 

@@ -97,9 +97,14 @@ jobs:
           version: "~> v2"
           install-only: true
 
-      - name: Build every release target
+      - name: Build every release target without signing
         if: ${{ steps.restore.outputs.cache-hit != 'true' }}
-        run: goreleaser build --snapshot --clean --skip=post-hooks
+        run: |
+          for config in .goreleaser.yaml .goreleaser.yml goreleaser.yaml goreleaser.yml; do
+            [ -f "$config" ] && break
+          done
+          yq 'del(.notarize)' "$config" > "$RUNNER_TEMP/warm.goreleaser.yaml"
+          goreleaser build --snapshot --clean --skip=post-hooks --config "$RUNNER_TEMP/warm.goreleaser.yaml"
 
       - name: Save the warmed Go build cache
         if: ${{ steps.restore.outputs.cache-hit != 'true' }}
