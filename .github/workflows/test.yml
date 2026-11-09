@@ -793,7 +793,10 @@ jobs:
           cp .github/test-fixtures/fake-gh-release.py "$fake_bin/gh"
           chmod +x "$fake_bin/gh"
           printf 'release bytes\n' > "$RUNNER_TEMP/tool.tar.gz"
-          printf '%s\n' "$RUNNER_TEMP/tool.tar.gz" > "$RUNNER_TEMP/assets"
+          printf 'other platform bytes\n' > "$RUNNER_TEMP/tool-linux.tar.gz"
+          printf 'checksums\n' > "$RUNNER_TEMP/checksums.txt"
+          printf '%s\n' "$RUNNER_TEMP/tool.tar.gz" "$RUNNER_TEMP/tool-linux.tar.gz" "$RUNNER_TEMP/checksums.txt" \
+            > "$RUNNER_TEMP/assets"
 
           run_stage() {
             scenario="$1"
@@ -820,8 +823,11 @@ jobs:
           run_stage delayed-list
           grep -Fxq 'release_id=101' "$RUNNER_TEMP/stage-delayed-list/outputs"
           test "$(jq -r .list_calls "$RUNNER_TEMP/stage-delayed-list/fake-state/state.json")" = 1
-          cmp "$RUNNER_TEMP/tool.tar.gz" "$RUNNER_TEMP/stage-delayed-list/exact-release-101/tool.tar.gz"
+          while IFS= read -r asset; do
+            cmp "$asset" "$RUNNER_TEMP/stage-delayed-list/exact-release-101/$(basename "$asset")"
+          done < "$RUNNER_TEMP/assets"
           delayed_state="$RUNNER_TEMP/stage-delayed-list/fake-state/state.json"
+          jq -e '[.assets[].name] | sort == ["checksums.txt", "tool-linux.tar.gz", "tool.tar.gz"]' "$delayed_state"
           jq -e '.notes_requests == [{"tag_name": "v1.2.3"}]' "$delayed_state"
           jq -e '.create_payloads[0].body == "## What'"'"'s Changed\n"' "$delayed_state"
           jq -e '.create_payloads[0] | has("generate_release_notes") | not' "$delayed_state"

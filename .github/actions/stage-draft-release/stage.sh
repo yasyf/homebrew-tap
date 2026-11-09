@@ -6,6 +6,42 @@ fail() {
   exit 1
 }
 
+each_asset_in_parallel() {
+  local step="$1" asset pid status=0
+  local pids=()
+  for asset in "${assets[@]}"; do
+    "$step" "$asset" &
+    pids+=("$!")
+  done
+  for pid in "${pids[@]}"; do
+    wait "$pid" || status=1
+  done
+  return "$status"
+}
+
+upload_asset() {
+  local asset="$1" name encoded
+  name="$(basename "$asset")"
+  load_release_state "$release_id" true "$RUNNER_TEMP/release-state-upload-${name}.json"
+  encoded="$(jq -rn --arg value "$name" '$value | @uri')"
+  gh api --method POST \
+    -H 'Content-Type: application/octet-stream' \
+    --input "$asset" \
+    "${upload_url}?name=${encoded}" \
+    > /dev/null
+}
+
+verify_uploaded_asset() {
+  local asset="$1" name asset_id
+  name="$(basename "$asset")"
+  asset_id="$(awk -F '\t' -v name="$name" '$2 == name { print $1 }' "$rows")"
+  [[ "$asset_id" =~ ^[0-9]+$ ]] || fail "asset ID for '$name' is missing"
+  gh api -H 'Accept: application/octet-stream' \
+    "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+    > "$download_dir/$name"
+  cmp "$asset" "$download_dir/$name" || fail "downloaded asset '$name' differs"
+}
+
 load_release_state() {
   local release_id="$1" expected_draft="$2" output="$3"
   gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > "$output" \
@@ -156,16 +192,7 @@ if [ "$draft" = true ]; then
     gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
   done < "$asset_ids"
 
-  for asset in "${assets[@]}"; do
-    load_release_state "$release_id" true "$state"
-    name="$(basename "$asset")"
-    encoded="$(jq -rn --arg value "$name" '$value | @uri')"
-    gh api --method POST \
-      -H 'Content-Type: application/octet-stream' \
-      --input "$asset" \
-      "${upload_url}?name=${encoded}" \
-      > /dev/null
-  done
+  each_asset_in_parallel upload_asset
 fi
 
 rows="$RUNNER_TEMP/release-asset-rows"
@@ -178,15 +205,7 @@ diff -u "$names" "$actual" || fail "release does not contain the exact asset set
 download_dir="$RUNNER_TEMP/exact-release-${release_id}"
 rm -rf "$download_dir"
 mkdir -p "$download_dir"
-for asset in "${assets[@]}"; do
-  name="$(basename "$asset")"
-  asset_id="$(awk -F '\t' -v name="$name" '$2 == name { print $1 }' "$rows")"
-  [[ "$asset_id" =~ ^[0-9]+$ ]] || fail "asset ID for '$name' is missing"
-  gh api -H 'Accept: application/octet-stream' \
-    "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
-    > "$download_dir/$name"
-  cmp "$asset" "$download_dir/$name" || fail "downloaded asset '$name' differs"
-done
+each_asset_in_parallel verify_uploaded_asset
 
 {
   echo "release_id=$release_id"

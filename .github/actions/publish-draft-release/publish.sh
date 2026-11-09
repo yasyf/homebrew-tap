@@ -39,6 +39,30 @@ assert_unique_release() {
   [ "$current_draft" = "$expected_draft" ] || fail "release draft state changed"
 }
 
+each_asset_in_parallel() {
+  local step="$1" asset pid status=0
+  local pids=()
+  for asset in "${assets[@]}"; do
+    "$step" "$asset" &
+    pids+=("$!")
+  done
+  for pid in "${pids[@]}"; do
+    wait "$pid" || status=1
+  done
+  return "$status"
+}
+
+verify_published_asset() {
+  local asset="$1" name asset_id downloaded
+  name="$(basename "$asset")"
+  asset_id="$(awk -F '\t' -v name="$name" '$2 == name { print $1 }' "$rows")"
+  [[ "$asset_id" =~ ^[0-9]+$ ]] || fail "asset ID for '$name' is missing"
+  downloaded="$RUNNER_TEMP/publish-${RELEASE_ID}-${name}"
+  gh api -H 'Accept: application/octet-stream' \
+    "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$downloaded"
+  cmp "$asset" "$downloaded" || fail "downloaded asset '$name' differs"
+}
+
 test -n "${GH_TOKEN:-}" || fail "token is required"
 test -n "${GITHUB_REPOSITORY:-}" || fail "GITHUB_REPOSITORY is required"
 [[ "${RELEASE_ID:-}" =~ ^[0-9]+$ ]] || fail "release ID is not numeric"
@@ -91,15 +115,7 @@ gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_
 cut -f2 "$rows" | sort > "$actual"
 diff -u "$expected" "$actual" || fail "release does not contain the exact asset set"
 
-for asset in "${assets[@]}"; do
-  name="$(basename "$asset")"
-  asset_id="$(awk -F '\t' -v name="$name" '$2 == name { print $1 }' "$rows")"
-  [[ "$asset_id" =~ ^[0-9]+$ ]] || fail "asset ID for '$name' is missing"
-  downloaded="$RUNNER_TEMP/publish-${RELEASE_ID}-${name}"
-  gh api -H 'Accept: application/octet-stream' \
-    "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$downloaded"
-  cmp "$asset" "$downloaded" || fail "downloaded asset '$name' differs"
-done
+each_asset_in_parallel verify_published_asset
 
 if [ "$(jq -r .draft "$state")" = true ]; then
   assert_unique_release true

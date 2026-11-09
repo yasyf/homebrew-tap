@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import fcntl
 import json
 import os
 import shutil
@@ -16,6 +17,8 @@ state_dir = Path(os.environ["FAKE_GH_STATE"])
 state_path = state_dir / "state.json"
 scenario = os.environ["FAKE_GH_SCENARIO"]
 state_dir.mkdir(parents=True, exist_ok=True)
+state_lock = (state_dir / "state.lock").open("w")
+fcntl.flock(state_lock, fcntl.LOCK_EX)
 
 
 def save() -> None:
