@@ -29,6 +29,21 @@ jobs:
     with: { setup-bun: true }   # optional, for a go:embed prebuild hook
 ```
 
+A release runs on its tag, and a tag reads only its own and main's Actions caches, so
+the same repo warms the release's Go build cache on every push to main, passing the
+inputs its release passes:
+
+```yaml
+# .github/workflows/release-cache.yml:
+name: Release cache
+on: { push: { branches: [main] } }
+permissions: { contents: read }
+jobs:
+  warm:
+    uses: yasyf/homebrew-tap/.github/workflows/go-release-cache.yml@<the release-go.yml commit>
+    with: { setup-bun: true }
+```
+
 and the Swift CLI path (one macOS runner; a universal `swift build`, native
 codesign + notarytool, a rendered binary cask — goreleaser has no Swift builder, so
 `release-swift.yml` hand-rolls the whole job from the same composite actions).

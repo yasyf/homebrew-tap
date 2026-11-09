@@ -1,0 +1,111 @@
+# Warms the Go build cache release-go.yml restores. A release runs on its tag, and a
+# tag reads only its own and the default branch's Actions caches, so each caller runs
+# this on every push to main with the inputs its release passes to release-go.yml.
+#   on: { push: { branches: [main] } }
+#   jobs: { warm: { uses: yasyf/homebrew-tap/.github/workflows/go-release-cache.yml@<sha> } }
+
+name: go-release-cache (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: the runner release-go.yml builds on
+        type: string
+        default: ubuntu-latest
+      go-version-file:
+        description: passed to actions/setup-go
+        type: string
+        default: go.mod
+      setup-bun:
+        description: install bun before goreleaser
+        type: boolean
+        default: false
+      setup-zig:
+        description: 'Zig version to install (e.g. "0.16.0"); empty to skip'
+        type: string
+        default: ""
+      pre-build:
+        description: the release's repo-specific runner setup
+        type: string
+        default: ""
+      setup-action:
+        description: "run the caller's ./.github/actions/release-setup composite action"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    runs-on: ${{ inputs.runner }}
+    concurrency:
+      group: go-release-cache-${{ github.repository }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - if: ${{ inputs.setup-bun }}
+        uses: oven-sh/setup-bun@v2
+
+      - if: ${{ inputs.setup-zig != '' }}
+        uses: xyzzylabs/setup-zig@v1
+        with:
+          version: ${{ inputs.setup-zig }}
+
+      - uses: actions/setup-go@v6
+        id: go
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          cache: false
+
+      - name: Locate the Go caches
+        id: go-cache
+        run: |
+          {
+            echo "build=$(go env GOCACHE)"
+            echo "modules=$(go env GOMODCACHE)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore the last warmed Go build cache
+        id: restore
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ steps.go-cache.outputs.build }}
+            ${{ steps.go-cache.outputs.modules }}
+          key: go-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
+          restore-keys: go-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+
+      - name: Drop modules the build no longer needs
+        if: ${{ steps.restore.outputs.cache-hit != 'true' }}
+        run: go clean -modcache
+
+      - name: Repo-specific pre-build setup
+        if: ${{ steps.restore.outputs.cache-hit != 'true' && inputs.pre-build != '' }}
+        run: ${{ inputs.pre-build }}
+
+      - name: Repo-specific setup action
+        if: ${{ steps.restore.outputs.cache-hit != 'true' && inputs.setup-action }}
+        uses: ./.github/actions/release-setup
+
+      - name: Install goreleaser
+        if: ${{ steps.restore.outputs.cache-hit != 'true' }}
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          install-only: true
+
+      - name: Build every release target
+        if: ${{ steps.restore.outputs.cache-hit != 'true' }}
+        run: goreleaser build --snapshot --clean --skip=post-hooks
+
+      - name: Save the warmed Go build cache
+        if: ${{ steps.restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ steps.go-cache.outputs.build }}
+            ${{ steps.go-cache.outputs.modules }}
+          key: ${{ steps.restore.outputs.cache-primary-key }}

@@ -114,6 +114,26 @@ jobs:
           grep -q 'without a codesign gate' "$RUNNER_TEMP/ungated/out"
           if grep -q 'without a codesign gate' "$RUNNER_TEMP/steps/out"; then echo "steps: gate not seen"; cat "$RUNNER_TEMP/steps/out"; exit 1; fi
 
+  go-release-cache-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: The warm workflow saves the exact Go cache release-go restores, and a tag never saves one
+        run: |
+          set -euo pipefail
+          release=.github/workflows/release-go.yml
+          warm=.github/workflows/go-release-cache.yml
+          restored="$(yq '.jobs.release.steps[] | select(.uses == "actions/cache/restore@v6") | .with' "$release")"
+          test -n "$restored"
+          diff <(echo "$restored") <(yq '.jobs.warm.steps[] | select(.uses == "actions/cache/restore@v6") | .with' "$warm")
+          diff <(yq '.jobs.warm.steps[] | select(.uses == "actions/cache/restore@v6") | .with.path' "$warm") \
+            <(yq '.jobs.warm.steps[] | select(.uses == "actions/cache/save@v6") | .with.path' "$warm")
+          if grep -Eq 'actions/cache(/save)?@|cache: true' "$release"; then
+            echo "::error::release-go must restore the cache main warmed, never save one into a tag's scope"
+            exit 1
+          fi
+
   swift-cask-gate-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 5

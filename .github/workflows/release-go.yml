@@ -14,6 +14,8 @@
 #   • signing: signer:quill (default, ubuntu, full-chain p12) or signer:codesign
 #     (a macOS runner; the import-developer-id action wires native codesign via a
 #     goreleaser post-hook calling {{ .Env.MACOS_CODESIGN_SCRIPT }}).
+#   • build cache: a tag reads only main's Actions caches, so callers run
+#     go-release-cache.yml with the same inputs on every push to main.
 #
 # Callers MUST use `secrets: inherit` (forwards HOMEBREW_TAP_TOKEN + the five MACOS_*).
 # Minimal callers pin this workflow by exact commit and inherit release credentials.
@@ -49,6 +51,10 @@ on:
         description: 'repo-specific runner setup run before goreleaser (install toolchains, echo env to $GITHUB_ENV)'
         type: string
         default: ""
+      setup-action:
+        description: "run the caller's ./.github/actions/release-setup composite action before goreleaser (cache-aware setup, such as restoring go:embed inputs CI already built)"
+        type: boolean
+        default: false
       render-formula:
         description: 'render a hand-maintained Formula/<name>.rb after goreleaser and publish it (for formulae goreleaser brews cannot express)'
         type: boolean
@@ -118,9 +124,27 @@ jobs:
           version: ${{ inputs.setup-zig }}
 
       - uses: actions/setup-go@v6
+        id: go
         with:
           go-version-file: ${{ inputs.go-version-file }}
-          cache: true
+          cache: false
+
+      - name: Locate the Go caches
+        id: go-cache
+        run: |
+          {
+            echo "build=$(go env GOCACHE)"
+            echo "modules=$(go env GOMODCACHE)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Go build cache warmed on main
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ steps.go-cache.outputs.build }}
+            ${{ steps.go-cache.outputs.modules }}
+          key: go-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
+          restore-keys: go-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
 
       - name: Require release signing credentials
         env:
@@ -145,6 +169,10 @@ jobs:
       - name: Repo-specific pre-build setup
         if: ${{ inputs.pre-build != '' }}
         run: ${{ inputs.pre-build }}
+
+      - name: Repo-specific setup action
+        if: ${{ inputs.setup-action }}
+        uses: ./.github/actions/release-setup
 
       - name: Import Developer ID certificate
         if: ${{ inputs.signer == 'codesign' }}
