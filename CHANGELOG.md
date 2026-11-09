@@ -17,6 +17,16 @@ provenance; floating family tags are never runtime dependencies.
 
 ## Unreleased (`v1` family)
 
+- `release-go.yml` restores its Go build and module cache from main instead of
+  building cold. A release runs on its tag, which reads only its own and main's
+  Actions caches, so every release compiled every dependency for every target
+  from scratch (2m44s of cc-slack's 5.5-minute release) and then saved a 390 MB
+  cache into the tag's scope that no later run could read. The new
+  `go-release-cache.yml` runs `goreleaser build --snapshot` on each push to main
+  and saves the cache the next release restores. `release-go.yml` also takes
+  `setup-action: true`, which runs the caller's `./.github/actions/release-setup`
+  composite action before GoReleaser, so a repo can restore go:embed inputs its
+  CI already caches instead of rebuilding them on every release.
 - `release-swift.yml` renders the binary cask's de-quarantine as a
   `postflight_steps` stanza instead of the Ruby `postflight` block Homebrew 7
   deprecated, which warned on every `brew upgrade`. The `codesign --verify
