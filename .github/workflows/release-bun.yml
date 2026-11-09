@@ -325,7 +325,7 @@ jobs:
 
       - name: Stage and verify the complete draft release
         id: draft
-        uses: yasyf/homebrew-tap/.github/actions/stage-draft-release@b6e2e7152f80485e0bedbe013f35fad7652802fb
+        uses: yasyf/homebrew-tap/.github/actions/stage-draft-release@c1c51894fbf19c9e3ddba64f6439e7a3bb2470da
         with:
           token: ${{ github.token }}
           tag: ${{ needs.setup.outputs.tag }}
@@ -487,7 +487,7 @@ jobs:
           ruby -c "$expected"
 
       - name: Publish the verified release
-        uses: yasyf/homebrew-tap/.github/actions/publish-draft-release@54e3e194bda69896894a82c17fcdb2822beefab5
+        uses: yasyf/homebrew-tap/.github/actions/publish-draft-release@c1c51894fbf19c9e3ddba64f6439e7a3bb2470da
         with:
           token: ${{ github.token }}
           release-id: ${{ steps.draft.outputs['release-id'] }}
