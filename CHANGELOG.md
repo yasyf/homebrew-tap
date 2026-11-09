@@ -22,8 +22,10 @@ provenance; floating family tags are never runtime dependencies.
   Actions caches, so every release compiled every dependency for every target
   from scratch (2m44s of cc-slack's 5.5-minute release) and then saved a 390 MB
   cache into the tag's scope that no later run could read. The new
-  `go-release-cache.yml` runs `goreleaser build --snapshot` on each push to main
-  and saves the cache the next release restores. `release-go.yml` also takes
+  `go-release-cache.yml` builds every release target on each push to main, from
+  a copy of the GoReleaser config without its `notarize` block and with build
+  post-hooks skipped, since `goreleaser build` notarizes too and the warm-up
+  carries no signing credentials. It saves the cache the next release restores. `release-go.yml` also takes
   `setup-action: true`, which runs the caller's `./.github/actions/release-setup`
   composite action before GoReleaser, so a repo can restore go:embed inputs its
   CI already caches instead of rebuilding them on every release.
