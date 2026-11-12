@@ -17,6 +17,19 @@ provenance; floating family tags are never runtime dependencies.
 
 ## Unreleased (`v1` family)
 
+- `release-go.yml` only signs: GoReleaser no longer receives the notary
+  credentials, so a release publishes without waiting on Apple. The new
+  `notarize-release.yml` reusable workflow, which a caller runs as its own job
+  with `needs: release`, downloads the published release's macOS binaries
+  (bare and inside each `.tar.gz`) and sends them to Apple in one submission
+  through `$MACOS_NOTARIZE_SCRIPT`. A failed notarization leaves the release
+  published. Before, Apple's wait sat inside the release job (22m50s for
+  cc-inbox v0.54.37), and two cc-slack releases, v0.19.142 and v0.19.148, never
+  published because Apple's notary service timed out or reset the connection.
+  To repin onto this commit, a caller deletes the `notarize:` entry under each
+  `notarize.macos` item of its `.goreleaser.yaml` (keeping `sign:`), since
+  GoReleaser fails on the notary variables it no longer gets, and adds the
+  `notarize` job.
 - `import-developer-id` splits notarization out of `macos-codesign.sh`:
   `$MACOS_CODESIGN_SCRIPT` now only signs, and the new `$MACOS_NOTARIZE_SCRIPT`
   (`macos-notarize.sh`) sends one binary, or a directory of binaries in one
