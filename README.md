@@ -27,7 +27,15 @@ jobs:
     uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@41f8de6765b3b833ef333b0b98f5683f0e46685b
     secrets: inherit
     with: { setup-bun: true }   # optional, for a go:embed prebuild hook
+  notarize:
+    needs: release
+    uses: yasyf/homebrew-tap/.github/workflows/notarize-release.yml@<exact commit>
+    secrets: inherit
 ```
+
+The release job only signs. The `notarize` job sends the published release's macOS
+binaries to Apple in one submission afterwards, so Apple's notary wait or failure never
+holds the release; a failed notarization reruns with GitHub's "Re-run failed jobs".
 
 A release runs on its tag, and a tag reads only its own and main's Actions caches, so
 the same repo warms the release's Go build cache on every push to main, passing the
@@ -109,8 +117,10 @@ that needs `brew services` or runtime `depends_on` ships as a **formula** (gorel
 
 Signing: pure-Go repos sign with goreleaser's **quill** on ubuntu (full-chain p12 required);
 repos already on a macOS runner — cgo, `.app` builds, and every Swift and bun release —
-sign with native **codesign + notarytool** via `import-developer-id` +
+sign with native **codesign** via `import-developer-id` +
 `$MACOS_CODESIGN_SCRIPT` (quill's arm64 signatures are SIGKILLed — anchore/quill#566).
+Go releases notarize after publishing through `notarize-release.yml`, which runs
+`$MACOS_NOTARIZE_SCRIPT` (`notarytool`); Swift and bun releases notarize before they publish.
 The canonical recipe + credential setup lives in `repo-bootstrap`'s
 `reference/go-ci-and-release.md` (Go), `reference/swift-ci-and-release.md` (Swift), and
 `reference/bun-ci-and-release.md` (Bun).

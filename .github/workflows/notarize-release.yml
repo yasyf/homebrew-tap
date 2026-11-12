@@ -1,0 +1,52 @@
+# A bare Mach-O cannot be stapled, so the published bytes stay as they are: Apple records
+# each binary's notarization by its code signature and Gatekeeper checks it online.
+
+name: notarize-release (reusable)
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  notarize:
+    runs-on: macos-15
+    steps:
+      - name: Import Developer ID certificate
+        uses: yasyf/homebrew-tap/.github/actions/import-developer-id@8fdd402b468794945d0205918810c34a80e583b0
+        with:
+          p12: ${{ secrets.MACOS_SIGN_P12 }}
+          p12-password: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          notary-key: ${{ secrets.MACOS_NOTARY_KEY }}
+          notary-key-id: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          notary-issuer-id: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+
+      - name: Collect the release's published macOS binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          assets="$RUNNER_TEMP/release-assets"
+          unpacked="$RUNNER_TEMP/release-unpacked"
+          binaries="$RUNNER_TEMP/notarize"
+          mkdir -p "$unpacked" "$binaries"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$assets" --pattern '*darwin*'
+          for archive in "$assets"/*.tar.gz; do
+            [ -e "$archive" ] || continue
+            dir="$unpacked/$(basename "$archive" .tar.gz)"
+            mkdir -p "$dir"
+            tar -xzf "$archive" -C "$dir"
+          done
+          while IFS= read -r -d '' file; do
+            file -b "$file" | grep -q '^Mach-O' || continue
+            sum="$(shasum -a 256 "$file" | cut -d' ' -f1)"
+            [ -e "$binaries/$sum" ] && continue
+            mkdir "$binaries/$sum"
+            cp "$file" "$binaries/$sum/"
+          done < <(find "$assets" "$unpacked" -type f -print0)
+          find "$binaries" -type f | grep . || { echo "::error::$TAG has no macOS binaries to notarize"; exit 1; }
+
+      - name: Notarize them in one Apple submission
+        run: bash "$MACOS_NOTARIZE_SCRIPT" "$RUNNER_TEMP/notarize"
