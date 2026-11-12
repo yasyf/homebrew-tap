@@ -17,6 +17,16 @@ provenance; floating family tags are never runtime dependencies.
 
 ## Unreleased (`v1` family)
 
+- `import-developer-id` splits notarization out of `macos-codesign.sh`:
+  `$MACOS_CODESIGN_SCRIPT` now only signs, and the new `$MACOS_NOTARIZE_SCRIPT`
+  (`macos-notarize.sh`) sends one binary, or a directory of binaries in one
+  submission, to Apple's notary service and fails unless Apple accepts it. A
+  release can now publish signed binaries and notarize them afterwards, so
+  Apple's wait (up to 23 minutes for cc-inbox's four binaries) and Apple's
+  failures stop holding a tool's release. `sign-notarize-binary` calls both
+  scripts and still notarizes before packaging. A caller that runs
+  `$MACOS_CODESIGN_SCRIPT` itself, as cc-notes' release does, notarizes nothing
+  at this pin until it calls `$MACOS_NOTARIZE_SCRIPT` too.
 - `stage-draft-release` uploads every asset and downloads each back for its
   byte check in parallel, and `publish-draft-release` downloads its byte checks
   in parallel. Each upload still re-reads the release first and refuses one that

@@ -3,9 +3,11 @@ description: >-
   Import the Apple Developer ID Application certificate into a throwaway keychain
   on a macOS runner, resolve the signing identity + Team ID, decode the App Store
   Connect notary key, and export standardized signing env for codesign/notarytool.
-  Also drops the canonical macos-codesign.sh on the runner and exports
-  $MACOS_CODESIGN_SCRIPT so a goreleaser build post-hook (or a hand build) can sign
-  each darwin binary with one shared script. Missing signing credentials fail before
+  Also drops the canonical macos-codesign.sh and macos-notarize.sh on the runner and
+  exports $MACOS_CODESIGN_SCRIPT, so a goreleaser build post-hook (or a hand build) can
+  sign each darwin binary with one shared script, and $MACOS_NOTARIZE_SCRIPT, which
+  sends one binary or a directory of them to Apple's notary service in one submission
+  and fails unless Apple accepts it. Missing signing credentials fail before
   any release artifact can be built or published. macOS runners only.
   This is the single home of the keychain dance — never copy it into a repo again.
 
@@ -62,10 +64,14 @@ runs:
           exit 1
         fi
 
-        # Export the canonical script only after the release credentials pass the
+        # Export the canonical scripts only after the release credentials pass the
         # fail-closed preflight.
         install -m 0755 "$ACTION_PATH/macos-codesign.sh" "$RUNNER_TEMP/macos-codesign.sh"
-        echo "MACOS_CODESIGN_SCRIPT=$RUNNER_TEMP/macos-codesign.sh" >> "$GITHUB_ENV"
+        install -m 0755 "$ACTION_PATH/macos-notarize.sh" "$RUNNER_TEMP/macos-notarize.sh"
+        {
+          echo "MACOS_CODESIGN_SCRIPT=$RUNNER_TEMP/macos-codesign.sh"
+          echo "MACOS_NOTARIZE_SCRIPT=$RUNNER_TEMP/macos-notarize.sh"
+        } >> "$GITHUB_ENV"
 
         # Import into a throwaway keychain (NEVER do this on a dev Mac — it locks the
         # login keychain). The keychain is added to the user search list so codesign
@@ -105,4 +111,4 @@ runs:
         echo "signed=true" >> "$GITHUB_OUTPUT"
         echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
         echo "team-id=$TEAM_ID" >> "$GITHUB_OUTPUT"
-        echo "import-developer-id: '$IDENTITY' (team $TEAM_ID) ready; macos-codesign.sh at $RUNNER_TEMP/macos-codesign.sh"
+        echo "import-developer-id: '$IDENTITY' (team $TEAM_ID) ready; macos-codesign.sh and macos-notarize.sh in $RUNNER_TEMP"

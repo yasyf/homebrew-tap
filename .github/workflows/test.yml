@@ -558,6 +558,7 @@ jobs:
           checked=(
             .github/actions/go-release-manifest/manifest.sh
             .github/actions/import-developer-id/macos-codesign.sh
+            .github/actions/import-developer-id/macos-notarize.sh
             .github/actions/prepare-app-build/prepare.sh
             .github/actions/publish-draft-release/publish.sh
             .github/actions/publish/delete-exact-file.sh
@@ -1236,6 +1237,11 @@ jobs:
           # The shared script is still a no-op for a genuinely non-Darwin target.
           bash "$script" "$RUNNER_TEMP/hello-bin" linux_amd64
           "$RUNNER_TEMP/hello-bin"
+          notarize="$GITHUB_WORKSPACE/.github/actions/import-developer-id/macos-notarize.sh"
+          if bash "$notarize" "$RUNNER_TEMP/hello-bin"; then
+            echo "::error::notarization unexpectedly started without a notary key"
+            exit 1
+          fi
 
       # --- Swift family (macOS leg only: swift/lipo/ditto are darwin tools) ---
       # Known coverage gap: sign-notarize-binary's release-attach step (softprops)
