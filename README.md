@@ -90,13 +90,13 @@ Xcode `.app`) and compose their own workflow:
 | Action | Purpose |
 |---|---|
 | `actions/verify-tag-on-main@2281a3ea884422db190de44fad65ce9bc08b19c4` | refuse a tag not reachable from `origin/main` (needs a prior `checkout` with `fetch-depth: 0`) |
-| `actions/import-developer-id@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | import the Developer ID cert into a throwaway keychain; export the signing env + `$MACOS_CODESIGN_SCRIPT` (the canonical `macos-codesign.sh`) — the single home of the keychain dance |
+| `actions/import-developer-id@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | import the Developer ID cert into a throwaway keychain; export the signing env + `$MACOS_CODESIGN_SCRIPT` (the canonical `macos-codesign.sh`, which signs) and `$MACOS_NOTARIZE_SCRIPT` (the canonical `macos-notarize.sh`, which notarizes a binary or a directory of them) — the single home of the keychain dance |
 | `actions/render-formula@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | fill a repo `.rb` template (`__VERSION__` / `__SHA_*__` / custom tokens) into a staging dir |
 | `actions/sign-notarize-app@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | sign + notarize + staple a built `.app`, zip it, attach to the release, output the zip's sha256 (pair with `render-formula` for its cask) |
 | `actions/wrap-daemon-bundle@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | wrap a bare Mach-O daemon in a minimal signed + notarized + stapled `.app` (with an embedded provisioning profile) so its TCC grant is keyed by `CFBundleIdentifier` and survives `brew upgrade` instead of re-prompting every release |
 | `actions/publish@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | merge a staging dir's `Formula/`/`Casks/` into this tap and push (idempotent) |
 | `actions/build-swift-universal@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | build an SPM executable as a universal (arm64 + x86_64) release binary and assert both slices |
-| `actions/sign-notarize-binary@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | codesign + notarize a bare Mach-O CLI via `$MACOS_CODESIGN_SCRIPT`, zip + checksum it, attach to the release (the `.app`-less sibling of `sign-notarize-app`); an optional `platform` input names a per-arch zip (how `release-bun.yml` uses it), defaulting to the swift `darwin-universal` |
+| `actions/sign-notarize-binary@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | codesign + notarize a bare Mach-O CLI via `$MACOS_CODESIGN_SCRIPT` and `$MACOS_NOTARIZE_SCRIPT`, zip + checksum it, attach to the release (the `.app`-less sibling of `sign-notarize-app`); an optional `platform` input names a per-arch zip (how `release-bun.yml` uses it), defaulting to the swift `darwin-universal` |
 | `actions/build-bun-binary@4afbb78f9e1814af04f9686ccf101ecafd5aa295` | compile a bun project into a single-file executable for one explicit `bun-<platform>` target (frozen install with retries, `file`-based Mach-O/ELF format assert) |
 
 Distribution choice: a pure-binary Go CLI ships as a **cask** (GoReleaser

@@ -1,9 +1,10 @@
 name: Sign, notarize, package a macOS CLI binary
 description: >-
   The shared tail for shipping a bare Mach-O CLI as a Homebrew cask: Developer ID
-  codesign + notarize it via $MACOS_CODESIGN_SCRIPT (the canonical macos-codesign.sh
-  — fail-closed identity/team verification, 3x submit retry, fail-loud on a
-  non-Accepted verdict),
+  codesign it via $MACOS_CODESIGN_SCRIPT (the canonical macos-codesign.sh —
+  fail-closed identity/team verification), notarize it via $MACOS_NOTARIZE_SCRIPT
+  (the canonical macos-notarize.sh — 3x submit retry, fail-loud on a non-Accepted
+  verdict),
   ditto-zip it into dist/<name>-<tag>-<platform>.zip with a .sha256 and a
   checksums.txt for caller-owned release publication.
   Outputs the zip's sha256 for the cask render. A bare binary cannot be stapled
@@ -69,9 +70,9 @@ runs:
           *) echo "::error::sign-notarize-binary only accepts a darwin-* platform (got '$PLATFORM')"; exit 1 ;;
         esac
 
-        # Sign + notarize in one call. The script keys on the darwin_ prefix only,
-        # so a per-arch slice label (darwin_arm64) is behavior-identical to the
-        # universal darwin_all — it names the slice being signed honestly.
+        # The codesign script keys on the darwin_ prefix only, so a per-arch slice
+        # label (darwin_arm64) is behavior-identical to the universal darwin_all —
+        # it names the slice being signed honestly.
         slice="${PLATFORM//-/_}"
         bash "$MACOS_CODESIGN_SCRIPT" "$BINARY" "$slice"
         codesign --verify --strict --verbose=2 "$BINARY"
@@ -79,6 +80,7 @@ runs:
         [ "$actual_team" = "$TEAM_ID" ] || {
           echo "::error::refusing to package $BINARY: TeamIdentifier '$actual_team' != '$TEAM_ID'"; exit 1;
         }
+        bash "$MACOS_NOTARIZE_SCRIPT" "$BINARY"
 
         # ditto -c -k archives the bare binary at the zip root — exactly where the
         # cask's `binary` stanza expects it.
