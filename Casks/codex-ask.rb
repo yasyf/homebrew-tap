@@ -7,15 +7,15 @@ cask "codex-ask" do
     end
   end
 
-  version "1.16.10"
+  version "1.16.11"
 
   on_macos do
     on_arm do
-      sha256 "dd17fed02a4a4d77f41136b318f7431cea8a364cb0c89b2cc03b0596d55011cb"
+      sha256 "4babcfa939e83caf6cdc898fe29c9ce44477df1aca5557ba97f8aa593093e4c4"
       url "https://github.com/yasyf/cc-skills/releases/download/v#{version}/codex-ask_#{version}_darwin_arm64.tar.gz"
     end
     on_intel do
-      sha256 "e37189e964438bc0fad0cddee068b16bf1c14cec1891306b8462a00850d94baa"
+      sha256 "9dfbe9230b6fc6877dccda03aaa7e7acc322d6595c5168a8a1bcc90809a42319"
       url "https://github.com/yasyf/cc-skills/releases/download/v#{version}/codex-ask_#{version}_darwin_amd64.tar.gz"
     end
   end
